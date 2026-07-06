@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jlegroup"
+version = "0.1.0"
+description = "Stellar-occultation light-curve forward modeling from the MIT Elliot-group lineage (Chamberlain & Elliot 1997; EY92 forthcoming)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Michael J. Person", email = "mjperson@mit.edu" },
+    { name = "William Saunders" },
+    { name = "WataThep" },
+]
+maintainers = [
+    { name = "Michael J. Person", email = "mjperson@mit.edu" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+    "numpy>=2.0",       # np.trapezoid
+    "scipy",
+    "pandas",
+    "numdifftools",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.urls]
+Repository = "https://github.com/mjperson/jlegroup"
+
+[tool.setuptools.packages.find]
+where = ["src"]

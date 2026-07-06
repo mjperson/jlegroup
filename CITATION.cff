@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use jlegroup, please cite both this software and Chamberlain & Elliot (1997)."
+title: "jlegroup"
+version: 0.1.0
+date-released: 2026-07-06
+type: software
+repository-code: "https://github.com/mjperson/jlegroup"
+license: MIT
+authors:
+  - family-names: Person
+    given-names: Michael J.
+  - family-names: Saunders
+    given-names: William
+  - name: "WataThep"
+references:
+  - type: article
+    title: "A Numerical Method for Calculating Stellar Occultation Light Curves from an Arbitrary Atmospheric Model"
+    authors:
+      - family-names: Chamberlain
+        given-names: D. M.
+      - family-names: Elliot
+        given-names: J. L.
+    journal: "Publications of the Astronomical Society of the Pacific"
+    volume: 109
+    year: 1997
+    start: 1170

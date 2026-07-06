@@ -1,0 +1,94 @@
+# jlegroup
+
+Python implementations of the MIT Elliot-group stellar-occultation light-curve methods.
+
+| Module | Method | Status |
+|---|---|---|
+| `jlegroup.CE97` | Chamberlain & Elliot (1997), PASP 109, 1170 — numerical light curves from an arbitrary atmospheric model | ✅ implemented & validated |
+| `jlegroup.EY92` | Elliot & Young (1992) — small-planet isothermal/haze model | 🚧 forthcoming (separate development) |
+| `jlegroup.physicalData` | constants mirroring the Mathematica ``jleGroup`physicalData`` (CODATA-1986 vintage) | ✅ |
+
+**Naming convention:** all-lowercase `jlegroup` is this Python package; camelCase
+`jleGroup` refers to the original Mathematica package family used within the group.
+
+## Status
+
+**Private, in development.** Intended license is MIT; permissions from the original
+authors in the code lineage (Wata → W. Saunders → M. Person) are being secured.
+Do not redistribute until this notice is removed.
+
+## Install
+
+```sh
+# from GitHub (works for collaborators on the private repo, via gh/ssh auth)
+pip install git+https://github.com/mjperson/jlegroup.git
+
+# or, for development, from a checkout:
+pip install -e ".[test]"
+```
+
+Requires Python ≥ 3.10 and numpy ≥ 2.0.
+
+## Quickstart
+
+```python
+import numpy as np
+from jlegroup import CE97, physicalData
+
+# refractivity profile from a number-density profile n(r) [m^-3], radius in km
+nu = physicalData.refractivity(n, gas="N2", wavelength_um=0.7)
+
+model = CE97.ChamberlainElliot1997Model(
+    refractivityProfile=nu,
+    radialDistance=radius_km,          # increasing, km
+    planetDistance=30 * physicalData.AU_KM,   # observer distance, km
+    position=y_km,                     # observer-plane positions, km
+)
+model.main()
+flux = model.focusedFlux               # normalized light curve at `position`
+```
+
+See `examples/isothermal_occultation.py` for a complete, runnable comparison against a
+bundled reference light curve.
+
+## Validation
+
+The CE97 implementation is validated against independently generated reference light
+curves (Mathematica `jleGroup` `olcOneLimb2`, EY92 family; λ = 0.7 µm; N₂; 30 AU;
+b = 900 km; v = 25 km/s). These run as the pytest regression suite (`tests/`).
+
+| Case | Temperature profile | max \|model − ref\| |
+|---|---|---|
+| iso-clear | T ∝ r⁰ (isothermal, 114.5 K) | 4.2 × 10⁻⁵ |
+| shallow-clear | T ∝ r⁻⁰·⁵ | 9.7 × 10⁻⁵ |
+| steep-clear | T ∝ r⁻⁴·⁵ | 1.1 × 10⁻³ * |
+
+\* Attributed to the *reference's* first-order-in-1/λ EY92 truncation, not to CE97: the
+neglected O(λ⁻²) dθ term has coefficient (9 − 34b + 25b²)/128, which quantitatively
+predicts the observed miss. For b = 0 and −0.5 the agreement meets the CE97 paper's
+~10⁻⁴ accuracy claim.
+
+## Known behavior / gotchas
+
+- **Positions above the modeled atmosphere top are extrapolated.** The y→r spline only
+  reaches y_top ≈ (top radius) + D·θ(top); beyond that the spline extrapolates and can
+  produce spurious caustic spikes. Physically those rays pass through vacuum → flux = 1:
+  clamp them (see `tests/test_benchmarks.py` or the example for the idiom). Ensure your
+  atmosphere table extends well above the flux-recovery altitude (a truncated top also
+  produces a spline edge artifact ~10⁻³ within ~2 scale heights of the boundary).
+- The model sums **all** geometric images found by the y→r mapping; the bundled
+  references are one-limb curves (far-limb flux is negligible for the bundled geometry).
+- Constants in `physicalData` are deliberately CODATA-1986 to match the Mathematica
+  package and the validation references — see the module docstring before "fixing" them.
+
+## Lineage & citation
+
+Original Python implementation by **WataThep** (2021), extended by **William Saunders**
+(2021), packaged, validated, and maintained by **Michael J. Person** (2026). The method
+is **Chamberlain & Elliot (1997)**, PASP 109, 1170 — please cite that paper (and this
+package; see `CITATION.cff`) in work that uses it. Development history and the full
+validation campaign live in the maintainer's research repository.
+
+## License
+
+MIT (see `LICENSE`; permissions from lineage authors in progress — see Status).
