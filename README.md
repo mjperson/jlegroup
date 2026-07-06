@@ -51,6 +51,12 @@ flux = model.focusedFlux               # normalized light curve at `position`
 See `examples/isothermal_occultation.py` for a complete, runnable comparison against a
 bundled reference light curve.
 
+**📓 Tutorial:** [`examples/jlegroup_tutorial.ipynb`](examples/jlegroup_tutorial.ipynb) —
+a guided tour (ships executed, with figures): `physicalData` constants, building
+atmospheres (isothermal, power-law gradients, thermal inversion layers), observer-plane
+and time-domain light curves with noise, and reproducing the bundled EY92 validation
+cases — including the atmosphere-top clamp idiom.
+
 ## Validation
 
 The CE97 implementation is validated against independently generated reference light
