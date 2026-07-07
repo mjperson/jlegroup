@@ -5,7 +5,7 @@ Python implementations of the MIT Elliot-group stellar-occultation light-curve m
 | Module | Method | Status |
 |---|---|---|
 | `jlegroup.CE97` | Chamberlain & Elliot (1997), PASP 109, 1170 — numerical light curves from an arbitrary atmospheric model | ✅ implemented & validated |
-| `jlegroup.EY92` | Elliot & Young (1992) — small-planet isothermal/haze model | 🚧 forthcoming (separate development) |
+| `jlegroup.EY92` | Elliot & Young (1992), AJ 103, 991 — analytic small-planet model with haze | ✅ implemented & validated |
 | `jlegroup.physicalData` | constants mirroring the Mathematica ``jleGroup`physicalData`` (CODATA-1986 vintage) | ✅ |
 
 **Naming convention:** all-lowercase `jlegroup` is this Python package; camelCase
@@ -74,6 +74,14 @@ neglected O(λ⁻²) dθ term has coefficient (9 − 34b + 25b²)/128, which qua
 predicts the observed miss. For b = 0 and −0.5 the agreement meets the CE97 paper's
 ~10⁻⁴ accuracy claim.
 
+**Method cross-validation (EY92 ↔ CE97 ↔ references):** the analytic `EY92` module
+validates independently against the paper's own benchmark tables (print precision at all
+series orders; two misprints in the published Appendix identified — see its module
+docstring), reproduces the Mathematica references above to **≤ 2.5 × 10⁻⁸** at
+`seriesOrder=1` (the generator's own truncation order), and agrees with CE97 pointwise
+to ≤ 1.6 × 10⁻⁵ at its default `seriesOrder=4` — confirming that the steep-clear
+deviation in the table is entirely reference truncation.
+
 ## Known behavior / gotchas
 
 - **Positions above the modeled atmosphere top are extrapolated.** The y→r spline only
@@ -86,6 +94,12 @@ predicts the observed miss. For b = 0 and −0.5 the agreement meets the CE97 pa
   references are one-limb curves (far-limb flux is negligible for the bundled geometry).
 - Constants in `physicalData` are deliberately CODATA-1986 to match the Mathematica
   package and the validation references — see the module docstring before "fixing" them.
+- `EY92` defaults to `seriesOrder=4` with corrected Appendix coefficients: pass
+  `seriesOrder=1` to reproduce Mathematica jleGroup curves, and
+  `seriesVariant="as-printed"` for the journal-text coefficients (~10⁻⁶ flux effect).
+  Its haze path is validated against the paper tables only, and the model is
+  one-limb/instantaneous (no ExpTime event-bin integration) — extend before fitting
+  real hazy events.
 
 ## Lineage & citation
 

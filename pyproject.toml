@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jlegroup"
-version = "0.1.0"
+version = "0.2.0"
 description = "Stellar-occultation light-curve forward modeling from the MIT Elliot-group lineage (Chamberlain & Elliot 1997; EY92 forthcoming)"
 readme = "README.md"
 requires-python = ">=3.10"

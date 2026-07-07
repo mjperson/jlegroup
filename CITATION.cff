@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "If you use jlegroup, please cite both this software and Chamberlain & Elliot (1997)."
 title: "jlegroup"
-version: 0.1.0
-date-released: 2026-07-06
+version: 0.2.0
+date-released: 2026-07-07
 type: software
 repository-code: "https://github.com/mjperson/jlegroup"
 license: MIT
