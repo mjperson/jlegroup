@@ -6,6 +6,7 @@ Python implementations of the MIT Elliot-group stellar-occultation light-curve m
 |---|---|---|
 | `jlegroup.CE97` | Chamberlain & Elliot (1997), PASP 109, 1170 — numerical light curves from an arbitrary atmospheric model | ✅ implemented & validated |
 | `jlegroup.EY92` | Elliot & Young (1992), AJ 103, 991 — analytic small-planet model with haze | ✅ implemented & validated |
+| `jlegroup.EPQ03` | Elliot, Person & Qu (2003), AJ 126, 1041 — light-curve **inversion** & atmospheric retrieval with error propagation | ✅ implemented & validated |
 | `jlegroup.physicalData` | constants mirroring the Mathematica ``jleGroup`physicalData`` (CODATA-1986 vintage) | ✅ |
 
 **Naming convention:** all-lowercase `jlegroup` is this Python package; camelCase
@@ -82,6 +83,19 @@ docstring), reproduces the Mathematica references above to **≤ 2.5 × 10⁻⁸
 to ≤ 1.6 × 10⁻⁵ at its default `seriesOrder=4` — confirming that the steep-clear
 deviation in the table is entirely reference truncation.
 
+**Inversion (EPQ03):** validated against the paper as oracle — the noiseless standard
+case reproduces Table 3's printed digits (mean/convergence temperature
+79.99685 / 79.99797 K vs the printed 79.997 / 79.998; max residual 0.0046 K vs ~0.004),
+the nonisothermal series stays within Fig. 6's envelope (worst case b = 9: 0.483% vs the
+printed +0.48%), and the formal errors match Monte-Carlo scatter at (S/N)_H = 100.
+Independently cross-checked at merge review against the Mathematica-generated iso-clear
+reference (external to the module's development): the boundary fit recovers the
+generator's parameters to machine precision (fit rms 8 × 10⁻¹⁴) and the inversion
+returns the machine-exact input atmosphere to 0.02% in temperature in the converged
+region, with pressure/density deviations collapsing from ~10⁻³ to ≲ 2 × 10⁻⁴ as the
+inversion boundary moves below the chord's coarsely sampled region — the binning
+sensitivity the paper's error analysis predicts.
+
 ## Known behavior / gotchas
 
 - **Positions above the modeled atmosphere top are extrapolated.** The y→r spline only
@@ -100,6 +114,15 @@ deviation in the table is entirely reference truncation.
   Its haze path is validated against the paper tables only, and the model is
   one-limb/instantaneous (no ExpTime event-bin integration) — extend before fitting
   real hazy events.
+- `EPQ03` inverts one limb of a **clear** atmosphere (haze/extinction and large-body
+  adaptations are out of scope; flux normalization is the caller's responsibility and
+  dominates the systematics — EPQ03 Sec. 7.4). Deliberate deviations from the printed
+  paper are documented in the module docstring: the half-light refractivity default
+  follows EY92 Eq. (4.28) — the paper's own digits require it; pass
+  `nu_h_method="epq03-66"` for the printed Eq. (66) — Table 10's Loschmidt exponent
+  misprint is corrected, and boundary conditions with λ_h ≲ 6 are rejected (the
+  half-light relation has no real solution there). On noisy data choose the inversion
+  boundary `i_b` explicitly (Sec. 7.3).
 
 ## Lineage & citation
 

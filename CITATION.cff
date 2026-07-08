@@ -1,8 +1,8 @@
 cff-version: 1.2.0
-message: "If you use jlegroup, please cite both this software and Chamberlain & Elliot (1997)."
+message: "If you use jlegroup, please cite this software and the method paper(s) you used (Chamberlain & Elliot 1997; Elliot & Young 1992; Elliot, Person & Qu 2003)."
 title: "jlegroup"
-version: 0.2.0
-date-released: 2026-07-07
+version: 0.3.0
+date-released: 2026-07-08
 type: software
 repository-code: "https://github.com/mjperson/jlegroup"
 license: MIT
@@ -24,3 +24,27 @@ references:
     volume: 109
     year: 1997
     start: 1170
+  - type: article
+    title: "Analysis of Stellar Occultation Data for Planetary Atmospheres. I. Model Fitting, with Application to Pluto"
+    authors:
+      - family-names: Elliot
+        given-names: J. L.
+      - family-names: Young
+        given-names: L. A.
+    journal: "The Astronomical Journal"
+    volume: 103
+    year: 1992
+    start: 991
+  - type: article
+    title: "Analysis of Stellar Occultation Data. II. Inversion, with Application to Pluto and Triton"
+    authors:
+      - family-names: Elliot
+        given-names: J. L.
+      - family-names: Person
+        given-names: M. J.
+      - family-names: Qu
+        given-names: S.
+    journal: "The Astronomical Journal"
+    volume: 126
+    year: 2003
+    start: 1041

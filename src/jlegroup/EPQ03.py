@@ -168,7 +168,7 @@ __all__ = [
 #   digit-level reproduction of the paper's tables.  Note one erratum:
 #   Table 10 prints Loschmidt's number as 2.68684e24 m^-3; the exponent
 #   is a misprint (the paper's own inversion tables imply ~2.687e25; see
-#   tests/test_constants.py), so the value here carries the corrected
+#   tests/test_EPQ03.py), so the value here carries the corrected
 #   exponent.
 #
 # The temperature retrieved by the inversion depends on the constants only
