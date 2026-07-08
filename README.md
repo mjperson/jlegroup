@@ -2,6 +2,9 @@
 
 Python implementations of the MIT Elliot-group stellar-occultation light-curve methods.
 
+*Named for James Ludlow Elliot (1943–2011) — author of the methods implemented here,
+and mentor to this package's maintainer.*
+
 | Module | Method | Status |
 |---|---|---|
 | `jlegroup.CE97` | Chamberlain & Elliot (1997), PASP 109, 1170 — numerical light curves from an arbitrary atmospheric model | ✅ implemented & validated |
