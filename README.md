@@ -8,7 +8,7 @@ and mentor to this package's maintainer.*
 | Module | Method | Status |
 |---|---|---|
 | `jlegroup.CE97` | Chamberlain & Elliot (1997), PASP 109, 1170 — numerical light curves from an arbitrary atmospheric model | ✅ implemented & validated |
-| `jlegroup.EY92` | Elliot & Young (1992), AJ 103, 991 — analytic small-planet model with haze | ✅ implemented & validated |
+| `jlegroup.EY92` | Elliot & Young (1992), AJ 103, 991 — analytic small-planet model with haze, two-limb/central flash, surface cutoff | ✅ implemented & validated |
 | `jlegroup.EPQ03` | Elliot, Person & Qu (2003), AJ 126, 1041 — light-curve **inversion** & atmospheric retrieval with error propagation | ✅ implemented & validated |
 | `jlegroup.physicalData` | constants mirroring the Mathematica ``jleGroup`physicalData`` (CODATA-1986 vintage) | ✅ |
 
@@ -84,7 +84,10 @@ series orders; two misprints in the published Appendix identified — see its mo
 docstring), reproduces the Mathematica references above to **≤ 2.5 × 10⁻⁸** at
 `seriesOrder=1` (the generator's own truncation order), and agrees with CE97 pointwise
 to ≤ 1.6 × 10⁻⁵ at its default `seriesOrder=4` — confirming that the steep-clear
-deviation in the table is entirely reference truncation.
+deviation in the table is entirely reference truncation. Two-limb (central-flash)
+fluxes are cross-validated per limb against CE97 evaluated at ±ρ on the same
+refractivity profiles: ≤ 3 × 10⁻⁷ (λ ≈ 21) and ≤ 7 × 10⁻⁸ (the bundled
+Mathematica-exact table, λ = 30, checked at merge review).
 
 **Inversion (EPQ03):** validated against the paper as oracle — the noiseless standard
 case reproduces Table 3's printed digits (mean/convergence temperature
@@ -114,9 +117,12 @@ sensitivity the paper's error analysis predicts.
 - `EY92` defaults to `seriesOrder=4` with corrected Appendix coefficients: pass
   `seriesOrder=1` to reproduce Mathematica jleGroup curves, and
   `seriesVariant="as-printed"` for the journal-text coefficients (~10⁻⁶ flux effect).
-  Its haze path is validated against the paper tables only, and the model is
-  one-limb/instantaneous (no ExpTime event-bin integration) — extend before fitting
-  real hazy events.
+  Its haze path is validated against the paper tables only. The model is one-limb by
+  default: pass `twoLimb=True` for the far limb / central flash, and set
+  `surfaceRadius` with it — the transparent analytic atmosphere otherwise passes
+  far-limb rays arbitrarily deep. Sampling is instantaneous (no ExpTime event-bin
+  integration) — extend before fitting real events with haze cut-ons or surface
+  contact.
 - `EPQ03` inverts one limb of a **clear** atmosphere (haze/extinction and large-body
   adaptations are out of scope; flux normalization is the caller's responsibility and
   dominates the systematics — EPQ03 Sec. 7.4). Deliberate deviations from the printed

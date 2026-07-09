@@ -59,8 +59,10 @@ fine if documented in the commit message.
     (the neglected dθ coefficient is (9 − 34b + 25b²)/128 for T ∝ r^b).
   - The package's series order 4 is parse-broken (a line-break bug makes it evaluate
     as order-3 plus a stray term); orders 2 and 3 are usable.
-  - The package usage text warns the b-series may still contain the error Chamberlain
-    (1996) found in the published EY92 — never confirmed corrected.
+  - The Chamberlain (1996) b-series error in the published EY92 is FIXED in the
+    occLightCurves 4.2.0 series bodies: they carry the corrected δ⁴ coefficients and
+    match this package's "corrected" variant exactly (confirmed 2026-07-08). Only the
+    package's usage-text warning is stale.
   - Clear-atmosphere references are one-limb and instantaneous; only bins containing
     haze cut-on/cut-off or surface events are ExpTime-integrated (none in clear cases).
 
