@@ -170,7 +170,13 @@ __all__ = [
 #   Table 10 prints Loschmidt's number as 2.68684e24 m^-3; the exponent
 #   is a misprint (the paper's own inversion tables imply ~2.687e25; see
 #   tests/test_EPQ03.py), so the value here carries the corrected
-#   exponent.
+#   exponent.  Provenance decode (2026-07-08, from the reference Mathematica
+#   physicalData_2.3 package): Table 10's constants match that package's
+#   older reference-[1]/Allen vintage at printed precision — G and k are
+#   pdGravitationalConstant[1] and pdBoltzmannConstant[1] (Taylor et al.
+#   1969), amu is pdAtomicMassUnit[1] (Allen 2nd ed.) — and the misprinted
+#   Loschmidt is exactly pdLoschmidtNumber[2] (Allen 3rd ed.) with an
+#   exponent typo.
 #
 # The temperature retrieved by the inversion depends on the constants only
 # through mu * m_amu * G * M_p / k  [Eqs. 57, 60], so tests that must hit

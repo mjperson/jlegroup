@@ -19,6 +19,9 @@ PINNED = {
     "AVOGADRO": 6.0221367e23,
     "LOSCHMIDT": 2.686763e25,
     "AU_KM": 1.49597870691e8,
+    "SPEED_OF_LIGHT": 2.99792458e8,
+    "PLANCK": 6.6260755e-34,
+    "STEFAN_BOLTZMANN": 5.67051e-8,
 }
 
 
@@ -36,7 +39,7 @@ def test_amu_derived_from_avogadro():
 # --- provenance policy -------------------------------------------------------
 
 ALL_CONSTANTS = ["BOLTZMANN", "GRAVITATIONAL", "AVOGADRO", "LOSCHMIDT",
-                 "AU_KM", "AMU"]
+                 "AU_KM", "AMU", "SPEED_OF_LIGHT", "PLANCK", "STEFAN_BOLTZMANN"]
 
 
 @pytest.mark.parametrize("name", ALL_CONSTANTS)
@@ -119,3 +122,89 @@ def test_refractivity_helper_identity():
     """n = L gives nu = nu_STP exactly."""
     nu = physicalData.refractivity(float(physicalData.LOSCHMIDT), "N2", 0.7)
     assert nu == pytest.approx(physicalData.refractivitySTP("N2", 0.7), rel=1e-14)
+
+
+# --- gas dispersion formulas (pdRefractivityAtSTP port) ------------------------
+
+# Regression pins at lambda = 0.5 um — the MATHEMATICA package's default
+# wavelength — computed from the ported formulas at merge time.
+DISPERSION_AT_HALF_MICRON = {
+    "N2": 0.00030016022315837914,
+    "H2": 0.00013988486400000002,      # package default = reference [2], Allen form
+    "Ar": 0.00028340241830010666,
+    "CO2": 0.0004502384,
+    "He": 3.875328e-05,
+    "Uranus": 0.00012471512640000002,  # 0.85 H2[2] + 0.15 He[1]
+}
+
+
+@pytest.mark.parametrize("gas,value", sorted(DISPERSION_AT_HALF_MICRON.items()))
+def test_dispersion_pins_at_pd_default_wavelength(gas, value):
+    assert physicalData.refractivitySTP(gas, 0.5) == pytest.approx(value, rel=1e-12)
+
+
+def test_h2_default_reference_is_two():
+    """Fidelity to physicalData_2.3.m: its ["H2", 0] rule is overridden to
+    reference [2] (Allen form) by a later definition — [1] (Peck & Huang
+    1977) remains available explicitly and differs by ~0.1%."""
+    lam = 0.5
+    default = physicalData.refractivitySTP("H2", lam)
+    assert default == physicalData.refractivitySTP("H2", lam, reference=2)
+    ph = physicalData.refractivitySTP("H2", lam, reference=1)
+    assert ph == pytest.approx(0.00014002141121495328, rel=1e-12)
+    assert default != ph
+
+
+def test_uranus_mixture_identities():
+    """"Uranus" = 0.85 H2[2] + 0.15 He[1], in both refractivity and MW."""
+    lam = 0.5
+    mix = (0.85 * physicalData.refractivitySTP("H2", lam, reference=2)
+           + 0.15 * physicalData.refractivitySTP("He", lam))
+    assert physicalData.refractivitySTP("Uranus", lam) == pytest.approx(mix, rel=1e-15)
+    mw = 0.85 * 2.016e-3 + 0.15 * 4.0026e-3
+    assert MOLAR_MASS["Uranus"] == pytest.approx(mw, rel=1e-15)
+
+
+def test_n2_default_unchanged_by_multigas_port():
+    """Backward compatibility: the validated N2-at-0.7-um value is untouched."""
+    assert physicalData.refractivitySTP("N2", 0.7) == 0.0002969636474759682
+    assert physicalData.refractivitySTP("N2", 0.7) == physicalData.refractivitySTP(
+        "N2", 0.7, reference=1
+    )
+
+
+def test_unknown_gas_raises():
+    with pytest.raises(NotImplementedError, match="available gases"):
+        physicalData.refractivitySTP("SF6", 0.5)
+    with pytest.raises(NotImplementedError):
+        physicalData.refractivitySTP("N2", 0.5, reference=9)
+
+
+def test_refractivity_sources_cover_all_formulas():
+    assert set(physicalData.REFRACTIVITY_SOURCES) == set(
+        physicalData._REFRACTIVITY_FORMULAS
+    )
+    assert all(physicalData.REFRACTIVITY_SOURCES.values())
+
+
+# --- body registry (pdMass/pdGM/pdEquatorialRadius port) -----------------------
+
+def test_bodies_registry_pins():
+    t = physicalData.BODIES["Triton"]
+    assert t.mass_kg == 2.1398e22          # the benchmark-suite body mass
+    assert t.mass_uncertainty_kg == 0.0053e22
+    assert t.radius_km == 1352.6
+    p = physicalData.BODIES["Pluto"]
+    assert p.mass_kg == 1.305e22           # Buie et al. 2006
+    assert p.gm_m3s2 == 8.70773e11         # Person 2006
+    assert physicalData.BODIES["Sun"].gm_m3s2 == 1.32712440018e20  # DE-405
+
+
+def test_bodies_mass_gm_internally_consistent():
+    """Where both are given, GM and G*mass (independent literature values)
+    agree well within a percent."""
+    g = float(physicalData.GRAVITATIONAL)
+    for body in physicalData.BODIES.values():
+        assert body.source
+        if body.mass_kg is not None and body.gm_m3s2 is not None:
+            assert body.gm_m3s2 / (g * body.mass_kg) == pytest.approx(1.0, abs=0.01)
