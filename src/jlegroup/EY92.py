@@ -78,9 +78,12 @@ __all__ = [
     "kappa1_from_unit_optical_depth",
     "rho_of_r",
     "r_of_rho",
+    "r_far_of_rho",
     "phi_cyl",
     "phi_ref",
     "phi",
+    "phi_two_limb",
+    "twoLimb",
     "D_theta_over_r_at_flux_level",
     "refractivity_at_flux_level",
     "AtmosphericParams",
@@ -327,6 +330,25 @@ def rho_of_r(r, d, r0, nu0, lambda_g0, a, b, order=MAX_ORDER, variant="corrected
     return np.asarray(r, dtype=float) + d * theta
 
 
+def _min_valid_radius(r0, lambda_g0, a, b):
+    """Deep boundary of the physical branch of rho(r).
+
+    For steep gradients (1 + a + b < 0) lambda_g *decreases* downward
+    and |D theta| peaks where lambda_g = -b - (1+a+b)/2 (where
+    d(nu sqrt(lambda))/dr = 0); below that the analytic continuation
+    "un-bends" and spawns spurious rho(r) roots.  Root finding is
+    restricted to r above this radius.  Returns 0 when the profile has
+    no turnover (1 + a + b >= 0, the usual case).
+    """
+    e = 1.0 + a + b
+    if e >= 0.0:
+        return 0.0
+    lambda_peak = -b - e / 2.0
+    if lambda_peak <= 0.0:
+        return 0.0
+    return r0 * (lambda_peak / lambda_g0) ** (1.0 / (-e))
+
+
 def r_of_rho(
     rho,
     d,
@@ -347,16 +369,33 @@ def r_of_rho(
     Newton can 2-cycle for steep thermal gradients (e.g. T ~ r^-4.5):
     starting from r = rho, deep in the (unphysical) analytic
     continuation, the first step overshoots above the atmosphere and
-    the next lands back.  Since theta < 0 makes the residual at r = rho
-    negative and any overshoot positive, the root is bracketed as soon
-    as both signs are seen; Newton steps leaving the bracket are
-    replaced by bisection (per element).
+    the next lands back.  Since theta < 0 makes the residual at the
+    lower bracket negative and any overshoot positive, the root is
+    bracketed as soon as both signs are seen; Newton steps leaving the
+    bracket are replaced by bisection (per element).  The search is
+    confined above _min_valid_radius, where rho(r) is monotonic
+    (d rho/dr = 1 + D dtheta/dr > 0), so the bracket logic is sound.
     """
     rho = np.asarray(rho, dtype=float)
     scalar = rho.ndim == 0
     rho = np.atleast_1d(rho)
-    r = rho.copy()  # residual here is D*theta <= 0: serves as lower bracket
-    lo = rho.copy()
+    r_floor = _min_valid_radius(r0, lambda_g0, a, b)
+    # Initial guess: the isothermal large-planet inversion
+    # r ~ r0 - (r0/lambda_g0) ln[(r0 - rho) lambda_g0 / r0] where the
+    # atmosphere dominates (rho < r0 - r0/lambda_g0), else r = rho.
+    # Starting from r = rho alone stalls for small rho: Newton steps
+    # there scale as r/lambda per iteration.  (Same strategy as the
+    # Mathematica jleGroup findR.)
+    shallow = rho > r0 - r0 / lambda_g0
+    with np.errstate(invalid="ignore", divide="ignore"):
+        deep_guess = r0 - (r0 / lambda_g0) * np.log(
+            np.maximum((r0 - rho) * lambda_g0 / r0, 1e-300)
+        )
+    # Lower bracket: r = rho has residual D*theta <= 0 on the physical
+    # branch; where the branch floor lies above rho, the floor itself
+    # over-bends (residual < 0) and brackets from below instead.
+    lo = np.maximum(rho, r_floor)
+    r = np.maximum(np.where(shallow, rho, deep_guess), lo)
     hi = np.full_like(rho, np.inf)  # upper bracket found on first overshoot
     for _ in range(max_iterations):
         residual = rho_of_r(r, d, r0, nu0, lambda_g0, a, b, order, variant) - rho
@@ -377,6 +416,181 @@ def r_of_rho(
             f"r_of_rho: iteration did not converge in {max_iterations} steps"
         )
     return float(r[0]) if scalar else r
+
+
+def r_far_of_rho(
+    rho,
+    d,
+    r0,
+    nu0,
+    lambda_g0,
+    a,
+    b,
+    order=MAX_ORDER,
+    variant="corrected",
+    rtol=1e-12,
+    max_iterations=200,
+):
+    """Far-limb periapsis radius: solve r + D theta(r) = -rho  (rho > 0).
+
+    A far-limb ray is bent so strongly it crosses the shadow axis and
+    arrives at observer-plane distance rho on the opposite side, i.e.
+    its signed observer coordinate is -rho [EY92 Eq. 2.2 with the
+    absolute value retained; cf. the Mathematica jleGroup olcTwoLimb4,
+    which evaluates the one-limb model at -rho].
+
+    rho(r) = r + D theta(r) is monotonic (d rho/dr = 1 + D dtheta/dr > 0)
+    on the physical branch, decreasing through zero at the focal radius
+    and negative below it, so the far root is bracketed between a
+    descent below the focal radius and the near-limb solution.  The
+    same bisection-safeguarded Newton as r_of_rho then refines it.
+    """
+    rho = np.asarray(rho, dtype=float)
+    scalar = rho.ndim == 0
+    rho = np.atleast_1d(rho)
+    if not np.all(rho > 0.0):
+        raise ValueError("r_far_of_rho: rho must be positive (use signed "
+                         "targets only through the near/far pair)")
+    args = (d, r0, nu0, lambda_g0, a, b, order, variant)
+
+    # Upper bracket: the near-limb radius (residual there is +2 rho > 0).
+    hi = np.atleast_1d(np.asarray(r_of_rho(rho, *args, rtol=rtol), dtype=float))
+    # Lower bracket: descend one local refractivity scale height
+    # H_n = r/(lambda_g + b) at a time until rho(r) < -rho.  |D theta|
+    # grows ~e-fold per H_n, so ~ln((r+rho)/(r-rho)) steps suffice.
+    # The descent floor is the physical-branch boundary
+    # (_min_valid_radius): if the bending maximum there still cannot
+    # reach -rho, no physical far-limb ray exists for these parameters.
+    r_floor = _min_valid_radius(r0, lambda_g0, a, b) * (1.0 + 1e-9) + 1e-9
+    lo = hi.copy()
+    need = np.full(rho.shape, True)
+    for _ in range(200):
+        h_n = np.abs(lo / (lambda_g(lo, r0, lambda_g0, a, b) + b))
+        trial = np.where(need, lo - np.maximum(h_n, 1e-3 * lo), lo)
+        trial = np.maximum(trial, r_floor)
+        residual = rho_of_r(trial, *args) + rho
+        lo = np.where(need, trial, lo)
+        need = need & (residual >= 0.0)
+        if not np.any(need):
+            break
+        if np.all(lo[need] <= r_floor):
+            raise RuntimeError(
+                "r_far_of_rho: the atmosphere's maximum bending cannot "
+                "carry rays across the shadow axis to these rho values "
+                "(no physical far-limb ray)"
+            )
+    else:
+        raise RuntimeError(
+            "r_far_of_rho: could not bracket the far-limb root within "
+            "the descent budget"
+        )
+
+    r = 0.5 * (lo + hi)
+    for _ in range(max_iterations):
+        residual = rho_of_r(r, *args) + rho  # target is -rho
+        lo = np.where(residual < 0.0, np.maximum(lo, r), lo)
+        hi = np.where(residual >= 0.0, np.minimum(hi, r), hi)
+        slope = 1.0 + D_dtheta_dr(r, *args)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            newton = r - residual / slope
+        outside = (newton <= lo) | (newton >= hi) | ~np.isfinite(newton)
+        r_next = np.where(outside, 0.5 * (lo + hi), newton)
+        step = r_next - r
+        r = r_next
+        if np.all(np.abs(step) <= rtol * np.abs(r)):
+            break
+    else:
+        raise RuntimeError(
+            f"r_far_of_rho: iteration did not converge in {max_iterations} steps"
+        )
+    return float(r[0]) if scalar else r
+
+
+def _limb_flux(
+    r,
+    d,
+    r0,
+    nu0,
+    lambda_g0,
+    a,
+    b,
+    r1=None,
+    kappa1=0.0,
+    h_tau1=1.0,
+    surface_radius=None,
+    order=MAX_ORDER,
+    variant="corrected",
+):
+    """Flux contribution of one limb from its periapsis radius r.
+
+    zeta(r) = exp(-tau) / (|1 + D theta/r| |1 + D dtheta/dr|)
+    [EY92 Eq. 2.1]; valid for either limb because the absolute values
+    are retained (on the far limb 1 + D theta/r = -rho/r < 0).  Rays
+    with periapsis below surface_radius are blocked (instantaneous
+    cutoff; ExpTime bin integration of the surface event is a separate,
+    planned extension).
+    """
+    r = np.asarray(r, dtype=float)
+    theta = bending_angle(r, r0, nu0, lambda_g0, a, b, order, variant)
+    focus = np.abs(1.0 + d * theta / r)
+    stretch = np.abs(
+        1.0 + D_dtheta_dr(r, d, r0, nu0, lambda_g0, a, b, order, variant)
+    )
+    with np.errstate(divide="ignore"):
+        result = 1.0 / (focus * stretch)
+    if r1 is not None and kappa1 != 0.0:
+        result = result * np.exp(-tau_obs(r, r1, kappa1, h_tau1, order))
+    if surface_radius is not None:
+        result = np.where(r < surface_radius, 0.0, result)
+    return result
+
+
+def phi_two_limb(
+    rho,
+    d,
+    r0,
+    nu0,
+    lambda_g0,
+    a,
+    b,
+    r1=None,
+    kappa1=0.0,
+    h_tau1=1.0,
+    surface_radius=None,
+    order=MAX_ORDER,
+    variant="corrected",
+):
+    """Two-limb normalized flux at observer-plane distance rho > 0.
+
+    Sums the near- and far-limb contributions [EY92 Eqs. 2.2/2.7 with
+    the absolute value retained; the Mathematica jleGroup olcTwoLimb4
+    equivalent].  The far limb produces the central flash: both terms
+    scale as r/rho near the shadow center, so the flux diverges at
+    rho = 0 exactly -- the geometric-optics focal singularity (EY92
+    Sec. 2); finite stellar diameter/diffraction, not modeled here,
+    bound it physically.
+
+    For small-lambda bodies the transparent analytic atmosphere admits
+    far-limb rays at all rho (passing arbitrarily deep), so a realistic
+    body should set surface_radius (and/or haze) to block them; without
+    it the model is a gas sphere with no surface.
+
+    Returns the total; use r_far_of_rho/_limb_flux for the pieces.
+    """
+    args = (d, r0, nu0, lambda_g0, a, b, order, variant)
+    extinction = dict(
+        r1=r1, kappa1=kappa1, h_tau1=h_tau1, surface_radius=surface_radius,
+        order=order, variant=variant,
+    )
+    r_near = r_of_rho(rho, *args)
+    r_far = r_far_of_rho(rho, *args)
+    near = _limb_flux(r_near, d, r0, nu0, lambda_g0, a, b, **extinction)
+    far = _limb_flux(r_far, d, r0, nu0, lambda_g0, a, b, **extinction)
+    return near + far
+
+
+#: Alias honoring the Mathematica jleGroup lineage name (olcTwoLimb4).
+twoLimb = phi_two_limb
 
 
 def phi_cyl(r, d, r0, nu0, lambda_g0, a, b, order=MAX_ORDER, variant="corrected"):
@@ -639,6 +853,14 @@ class ElliotYoung1992Model:
     hazeOnsetRadius, hazeKappa1, hazeScaleHeight : optional haze layer
         [Eq. 3.23]: top radius km, absorption at onset km^-1, scale
         height at onset km.
+    twoLimb : bool, default False.  When True, add the far-limb
+        contribution (rays crossing the shadow axis; EY92 Eq. 2.7 with
+        the absolute value retained -- the olcTwoLimb4 equivalent),
+        producing the central flash near the shadow center.
+    surfaceRadius : float km, optional.  Rays with periapsis below this
+        are blocked (instantaneous cutoff).  Strongly recommended with
+        twoLimb for small-lambda bodies: the transparent analytic
+        atmosphere otherwise passes far-limb rays arbitrarily deep.
     seriesOrder : int 0-4; 1 matches the Mathematica jleGroup default,
         0 is the Baum & Code large-planet limit.  Default 4.
     seriesVariant : "corrected" (default) or "as-printed"; see module
@@ -662,6 +884,8 @@ class ElliotYoung1992Model:
         hazeOnsetRadius=None,
         hazeKappa1=None,
         hazeScaleHeight=None,
+        twoLimb=False,
+        surfaceRadius=None,
         seriesOrder=MAX_ORDER,
         seriesVariant="corrected",
     ):
@@ -677,6 +901,8 @@ class ElliotYoung1992Model:
         self.hazeOnsetRadius = hazeOnsetRadius
         self.hazeKappa1 = hazeKappa1
         self.hazeScaleHeight = hazeScaleHeight
+        self.twoLimb = twoLimb
+        self.surfaceRadius = surfaceRadius
         self.seriesOrder = seriesOrder
         self.seriesVariant = seriesVariant
 
@@ -695,13 +921,16 @@ class ElliotYoung1992Model:
             / (_GAS_CONSTANT * referenceTemperature * (referenceRadius * 1e3))
         )
 
-        self.planetRadius_solution = None  # r(rho) per position, km
-        self.theta = None
-        self.dtheta = None
-        self.tauObs = None
-        self.transmission = None
-        self.unfocusedFlux = None
-        self.focusedFlux = None
+        self.planetRadius_solution = None  # near-limb r(rho) per position, km
+        self.farPlanetRadius_solution = None  # far-limb r, km (twoLimb only)
+        self.theta = None  # near-limb bending angle, rad
+        self.dtheta = None  # near-limb dtheta/dr, rad/km
+        self.tauObs = None  # near-limb haze optical depth
+        self.transmission = None  # near-limb exp(-tau)
+        self.unfocusedFlux = None  # near-limb cylindrical flux
+        self.nearLimbFlux = None
+        self.farLimbFlux = None  # twoLimb only
+        self.focusedFlux = None  # total model flux
 
     def main(self):
         """Compute the light curve at the given observer-plane positions."""
@@ -715,6 +944,14 @@ class ElliotYoung1992Model:
             self.seriesOrder,
             self.seriesVariant,
         )
+        extinction = dict(
+            r1=self.hazeOnsetRadius,
+            kappa1=self.hazeKappa1 or 0.0,
+            h_tau1=self.hazeScaleHeight if self.hazeScaleHeight else 1.0,
+            surface_radius=self.surfaceRadius,
+            order=self.seriesOrder,
+            variant=self.seriesVariant,
+        )
         r = r_of_rho(self.position, *args)
         self.planetRadius_solution = r
         self.theta = bending_angle(
@@ -725,12 +962,23 @@ class ElliotYoung1992Model:
             D_dtheta_dr(r, *args) / self.planetDistance
         )
         self.unfocusedFlux = phi_cyl(r, *args)
-        self.focusedFlux = phi_ref(r, *args)
         if self.hazeOnsetRadius is not None and self.hazeKappa1:
             self.tauObs = tau_obs(
                 r, self.hazeOnsetRadius, self.hazeKappa1,
                 self.hazeScaleHeight, self.seriesOrder,
             )
             self.transmission = np.exp(-self.tauObs)
-            self.focusedFlux = self.focusedFlux * self.transmission
+        self.nearLimbFlux = _limb_flux(
+            r, self.planetDistance, self.referenceRadius, self.nu0,
+            self.lambda_g0, self.a, self.b, **extinction,
+        )
+        self.focusedFlux = self.nearLimbFlux
+        if self.twoLimb:
+            r_far = r_far_of_rho(self.position, *args)
+            self.farPlanetRadius_solution = r_far
+            self.farLimbFlux = _limb_flux(
+                r_far, self.planetDistance, self.referenceRadius, self.nu0,
+                self.lambda_g0, self.a, self.b, **extinction,
+            )
+            self.focusedFlux = self.nearLimbFlux + self.farLimbFlux
         return self.focusedFlux
