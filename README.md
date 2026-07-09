@@ -10,7 +10,7 @@ and mentor to this package's maintainer.*
 | `jlegroup.CE97` | Chamberlain & Elliot (1997), PASP 109, 1170 — numerical light curves from an arbitrary atmospheric model | ✅ implemented & validated |
 | `jlegroup.EY92` | Elliot & Young (1992), AJ 103, 991 — analytic small-planet model with haze, two-limb/central flash, surface cutoff | ✅ implemented & validated |
 | `jlegroup.EPQ03` | Elliot, Person & Qu (2003), AJ 126, 1041 — light-curve **inversion** & atmospheric retrieval with error propagation | ✅ implemented & validated |
-| `jlegroup.physicalData` | constants mirroring the Mathematica ``jleGroup`physicalData`` (CODATA-1986 vintage, test-pinned, with provenance records) + the EY92 Table 9 gas registry | ✅ |
+| `jlegroup.physicalData` | constants mirroring the Mathematica ``jleGroup`physicalData`` (CODATA-1986 vintage, test-pinned, with provenance records) + the EY92 Table 9 gas registry, multi-gas dispersion formulas (N₂, H₂, Ar, CO₂, He, 85/15 H₂–He "Uranus"), and an occultation-target body registry (Pluto, Triton, Sun) | ✅ |
 
 **Naming convention:** all-lowercase `jlegroup` is this Python package; camelCase
 `jleGroup` refers to the original Mathematica package family used within the group.
