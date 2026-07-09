@@ -104,6 +104,7 @@ from scipy.integrate import quad_vec
 from scipy.optimize import least_squares
 
 from . import EY92, physicalData
+from .physicalData import CODATA1986, ConstantSet, Gas, GASES
 
 __all__ = [
     "ConstantSet",
@@ -158,11 +159,11 @@ __all__ = [
 #############################################################################
 # Physical constants and gas data for EPQ03 inversions.
 #
-# Two constant sets are provided:
-#
-# * ``CODATA1986`` (default) — re-exported from ``jlegroup.physicalData``,
-#   the vintage used throughout the jlegroup package and its Mathematica
-#   ancestors.  Use this for all new work.
+# The shared pieces — the ``ConstantSet`` injection mechanism, the
+# package-default ``CODATA1986`` set, and the EY92/EPQ03 Table 9 gas
+# registry (``Gas``, ``GASES``) — live in ``jlegroup.physicalData``
+# (consolidated 2026-07-08) and are re-exported here unchanged for the
+# established EPQ03 API.  Method-specific to this module:
 #
 # * ``EPQ03_TABLE10`` — the values printed in EPQ03 Table 10, for
 #   digit-level reproduction of the paper's tables.  Note one erratum:
@@ -175,41 +176,9 @@ __all__ = [
 # through mu * m_amu * G * M_p / k  [Eqs. 57, 60], so tests that must hit
 # a temperature target to ~1e-4 derive the body mass from Eq. (60) with
 # the same constant set used by the inversion (see ``mass_from_lambda``).
-#
-# Gas data (mean molecular weight, refractivity at STP) follow EY92
-# Table 9 / EPQ03 Table 9, which is what the papers' numbers are built
-# on; ``jlegroup.physicalData.refractivitySTP`` offers a wavelength-
-# dependent alternative for N2.
 
 #: km per astronomical unit (jlegroup.physicalData).
 AU_KM = physicalData.AU_KM
-
-
-@dataclass(frozen=True)
-class ConstantSet:
-    """The four physical constants the inversion equations use.
-
-    gravitational : G, m^3 kg^-1 s^-2
-    boltzmann : k, J/K
-    loschmidt : L, m^-3 (number density at STP)
-    amu : atomic mass unit, kg
-    """
-
-    name: str
-    gravitational: float
-    boltzmann: float
-    loschmidt: float
-    amu: float
-
-
-#: jlegroup vintage (CODATA 1986); amu derived from Avogadro for consistency.
-CODATA1986 = ConstantSet(
-    name="CODATA-1986 (jlegroup.physicalData)",
-    gravitational=physicalData.GRAVITATIONAL,
-    boltzmann=physicalData.BOLTZMANN,
-    loschmidt=physicalData.LOSCHMIDT,
-    amu=1e-3 / physicalData.AVOGADRO,
-)
 
 #: EPQ03 Table 10 as printed, except the Loschmidt exponent erratum (e24 -> e25).
 EPQ03_TABLE10 = ConstantSet(
@@ -219,28 +188,6 @@ EPQ03_TABLE10 = ConstantSet(
     loschmidt=2.68684e25,
     amu=1.66030e-27,
 )
-
-
-@dataclass(frozen=True)
-class Gas:
-    """Homogeneous-atmosphere gas data (EY92/EPQ03 Table 9).
-
-    mu : mean molecular weight, amu
-    nu_stp : refractivity at standard temperature and pressure
-    """
-
-    name: str
-    mu: float
-    nu_stp: float
-
-
-#: EY92 Table 9 values (nu_STP integrated over the KAO CCD response there;
-#: EPQ03 Table 9/Table 1 uses the same N2 pair).
-GASES = {
-    "N2": Gas("N2", 28.01, 2.980e-4),
-    "CH4": Gas("CH4", 16.04, 4.401e-4),
-    "CO": Gas("CO", 28.01, 3.364e-4),
-}
 
 
 def mass_from_lambda(lambda_h, r_h_km, t_h, mu, constants=CODATA1986):
