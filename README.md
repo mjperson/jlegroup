@@ -17,10 +17,12 @@ and mentor to this package's maintainer.*
 
 ## Status
 
-**Private, in development.** Intended license is MIT; permissions from the original
-authors in the code lineage (W. Tubthong → W. Saunders → M. Person):
-**Wata (Chanita) Tubthong — granted, unrestricted (2026-07-10)**; W. Saunders — pending.
-Do not redistribute until this notice is removed.
+**Private, in development.** License is MIT, with permissions granted by **all** authors
+in the code lineage (W. Tubthong → W. Saunders → M. Person):
+**Wata (Chanita) Tubthong — granted, unrestricted (2026-07-10)**;
+**William Saunders — granted, full (2026-07-11)**.
+Public release / PyPI publication is now purely a maintainer decision;
+until it happens, do not redistribute.
 
 ## Install
 
@@ -149,4 +151,4 @@ validation campaign live in the maintainer's research repository.
 
 ## License
 
-MIT (see `LICENSE`; permissions from lineage authors in progress — see Status).
+MIT (see `LICENSE`; all lineage-author permissions granted — see Status).
