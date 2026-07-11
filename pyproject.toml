@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 authors = [
     { name = "Michael J. Person", email = "mjperson@mit.edu" },
     { name = "William Saunders" },
-    { name = "WataThep" },
+    { name = "Wata (Chanita) Tubthong" },
 ]
 maintainers = [
     { name = "Michael J. Person", email = "mjperson@mit.edu" },

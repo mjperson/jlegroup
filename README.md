@@ -18,7 +18,8 @@ and mentor to this package's maintainer.*
 ## Status
 
 **Private, in development.** Intended license is MIT; permissions from the original
-authors in the code lineage (Wata → W. Saunders → M. Person) are being secured.
+authors in the code lineage (W. Tubthong → W. Saunders → M. Person):
+**Wata (Chanita) Tubthong — granted, unrestricted (2026-07-10)**; W. Saunders — pending.
 Do not redistribute until this notice is removed.
 
 ## Install
@@ -135,8 +136,10 @@ sensitivity the paper's error analysis predicts.
 
 ## Lineage & citation
 
-Original Python implementation by **WataThep** (2021), extended by **William Saunders**
-(2021), packaged, validated, and maintained by **Michael J. Person** (2026). The method
+Original Python implementation by **Wata (Chanita) Tubthong**
+([ORCID 0000-0002-7907-2634](https://orcid.org/0000-0002-7907-2634), 2021), extended by
+**William Saunders** (2021), packaged, validated, and maintained by **Michael J. Person**
+([ORCID 0000-0003-0000-0572](https://orcid.org/0000-0003-0000-0572), 2026). The method
 is **Chamberlain & Elliot (1997)**, PASP 109, 1170 — please cite that paper (and this
 package; see `CITATION.cff`) in work that uses it. Development history and the full
 validation campaign live in the maintainer's research repository.

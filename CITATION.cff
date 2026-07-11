@@ -9,9 +9,12 @@ license: MIT
 authors:
   - family-names: Person
     given-names: Michael J.
+    orcid: "https://orcid.org/0000-0003-0000-0572"
   - family-names: Saunders
     given-names: William
-  - name: "WataThep"
+  - family-names: Tubthong
+    given-names: "Wata (Chanita)"
+    orcid: "https://orcid.org/0000-0002-7907-2634"
 references:
   - type: article
     title: "A Numerical Method for Calculating Stellar Occultation Light Curves from an Arbitrary Atmospheric Model"
@@ -42,6 +45,7 @@ references:
         given-names: J. L.
       - family-names: Person
         given-names: M. J.
+        orcid: "https://orcid.org/0000-0003-0000-0572"
       - family-names: Qu
         given-names: S.
     journal: "The Astronomical Journal"
