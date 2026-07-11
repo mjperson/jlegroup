@@ -56,11 +56,14 @@ flux = model.focusedFlux               # normalized light curve at `position`
 See `examples/isothermal_occultation.py` for a complete, runnable comparison against a
 bundled reference light curve.
 
-**📓 Tutorial:** [`examples/jlegroup_tutorial.ipynb`](examples/jlegroup_tutorial.ipynb) —
-a guided tour (ships executed, with figures): `physicalData` constants, building
-atmospheres (isothermal, power-law gradients, thermal inversion layers), observer-plane
-and time-domain light curves with noise, and reproducing the bundled EY92 validation
-cases — including the atmosphere-top clamp idiom.
+**📓 Tutorials** (in [`examples/`](examples/); shipped executed, with figures):
+
+| notebook | covers |
+|---|---|
+| [`00_jlegroup_overview.ipynb`](examples/00_jlegroup_overview.ipynb) | the package in one exercise: EY92 ↔ CE97 forward cross-check, then the EPQ03 inversion round trip |
+| [`01_EY92_basics.ipynb`](examples/01_EY92_basics.ipynb) | analytic model: parameters, series order & misprint corrections, haze, two-limb central flash |
+| [`02_CE97_basics.ipynb`](examples/02_CE97_basics.ipynb) | numerical model: atmosphere builders, time-domain curves + noise, validation vs bundled references, the atmosphere-top clamp idiom |
+| [`03_EPQ03_basics.ipynb`](examples/03_EPQ03_basics.ipynb) | inversion: noiseless round trip, noisy retrieval, the EPQ03 error budget, thermal gradients |
 
 ## Validation
 
