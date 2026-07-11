@@ -143,7 +143,8 @@ sensitivity the paper's error analysis predicts.
 
 Original Python implementation by **Wata (Chanita) Tubthong**
 ([ORCID 0000-0002-7907-2634](https://orcid.org/0000-0002-7907-2634), 2021), extended by
-**William Saunders** (2021), packaged, validated, and maintained by **Michael J. Person**
+**William Saunders** ([ORCID 0000-0002-8737-742X](https://orcid.org/0000-0002-8737-742X),
+2021), packaged, validated, and maintained by **Michael J. Person**
 ([ORCID 0000-0003-0000-0572](https://orcid.org/0000-0003-0000-0572), 2026). The method
 is **Chamberlain & Elliot (1997)**, PASP 109, 1170 — please cite that paper (and this
 package; see `CITATION.cff`) in work that uses it. Development history and the full
