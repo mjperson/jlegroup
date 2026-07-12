@@ -6,7 +6,7 @@ anything. Start with the overview, then the module you need:
 | notebook | covers |
 |---|---|
 | [`00_jlegroup_overview.ipynb`](00_jlegroup_overview.ipynb) | the package in one exercise: EY92 analytic curve ↔ CE97 numerical curve cross-check, then the EPQ03 inversion round trip |
-| [`01_EY92_basics.ipynb`](01_EY92_basics.ipynb) | the analytic model: physical parameters, series order & the appendix-misprint corrections, haze layers, two-limb **central flash** |
+| [`01_EY92_basics.ipynb`](01_EY92_basics.ipynb) | the analytic model: physical parameters, series order & the appendix-misprint corrections, haze layers, two-limb **central flash**, the traditional half-light fitting parameterizations |
 | [`02_CE97_basics.ipynb`](02_CE97_basics.ipynb) | the numerical model: atmosphere builders (power-law and arbitrary T(r)), time-domain curves + noise, validation against the bundled references, the atmosphere-top clamp idiom |
 | [`03_EPQ03_basics.ipynb`](03_EPQ03_basics.ipynb) | inversion: noiseless round trip, noisy retrieval with a deliberate boundary choice, the full error budget, thermal gradients |
 

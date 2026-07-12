@@ -8,7 +8,7 @@ and mentor to this package's maintainer.*
 | Module | Method | Status |
 |---|---|---|
 | `jlegroup.CE97` | Chamberlain & Elliot (1997), PASP 109, 1170 — numerical light curves from an arbitrary atmospheric model | ✅ implemented & validated |
-| `jlegroup.EY92` | Elliot & Young (1992), AJ 103, 991 — analytic small-planet model with haze, two-limb/central flash, surface cutoff | ✅ implemented & validated |
+| `jlegroup.EY92` | Elliot & Young (1992), AJ 103, 991 — analytic small-planet model with haze, two-limb/central flash, surface cutoff, and the traditional half-light fitting parameterizations (r_h, λ_iso) / (r_h, H) | ✅ implemented & validated |
 | `jlegroup.EPQ03` | Elliot, Person & Qu (2003), AJ 126, 1041 — light-curve **inversion** & atmospheric retrieval with error propagation | ✅ implemented & validated |
 | `jlegroup.physicalData` | constants mirroring the Mathematica ``jleGroup`physicalData`` (CODATA-1986 vintage, test-pinned, with provenance records) + the EY92 Table 9 gas registry, multi-gas dispersion formulas (N₂, H₂, Ar, CO₂, He, 85/15 H₂–He "Uranus"), and an occultation-target body registry (Pluto, Triton, Sun) | ✅ |
 
@@ -63,7 +63,7 @@ bundled reference light curve.
 | notebook | covers |
 |---|---|
 | [`00_jlegroup_overview.ipynb`](examples/00_jlegroup_overview.ipynb) | the package in one exercise: EY92 ↔ CE97 forward cross-check, then the EPQ03 inversion round trip |
-| [`01_EY92_basics.ipynb`](examples/01_EY92_basics.ipynb) | analytic model: parameters, series order & misprint corrections, haze, two-limb central flash |
+| [`01_EY92_basics.ipynb`](examples/01_EY92_basics.ipynb) | analytic model: parameters, series order & misprint corrections, haze, two-limb central flash, traditional fitting parameterizations |
 | [`02_CE97_basics.ipynb`](examples/02_CE97_basics.ipynb) | numerical model: atmosphere builders, time-domain curves + noise, validation vs bundled references, the atmosphere-top clamp idiom |
 | [`03_EPQ03_basics.ipynb`](examples/03_EPQ03_basics.ipynb) | inversion: noiseless round trip, noisy retrieval, the EPQ03 error budget, thermal gradients |
 
@@ -128,7 +128,11 @@ sensitivity the paper's error analysis predicts.
   `surfaceRadius` with it — the transparent analytic atmosphere otherwise passes
   far-limb rays arbitrarily deep. Sampling is instantaneous (no ExpTime event-bin
   integration) — extend before fitting real events with haze cut-ons or surface
-  contact.
+  contact. For **fitting**, use the traditional half-light classes
+  (`ElliotYoung1992ModelTraditional`, `...TraditionalScaleHeight`): physical inputs
+  enter the model only through (ν₀, λ_g0), so fitting P/T/M chases a degeneracy ridge —
+  the half-light pair (r_h, λ_iso) [Mathematica `lambdaHi` convention; λ_true =
+  λ_iso − (3a+5b)/2 applied internally] or (r_h, H) is what the curve constrains.
 - `EPQ03` inverts one limb of a **clear** atmosphere (haze/extinction and large-body
   adaptations are out of scope; flux normalization is the caller's responsibility and
   dominates the systematics — EPQ03 Sec. 7.4). Deliberate deviations from the printed
