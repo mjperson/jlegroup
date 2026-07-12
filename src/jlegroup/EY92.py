@@ -90,6 +90,8 @@ __all__ = [
     "DataParams",
     "data_to_atmospheric",
     "ElliotYoung1992Model",
+    "ElliotYoung1992ModelTraditional",
+    "ElliotYoung1992ModelTraditionalScaleHeight",
 ]
 
 #: Highest power-series truncation order printed in EY92 (Appendix).
@@ -982,3 +984,165 @@ class ElliotYoung1992Model:
             )
             self.focusedFlux = self.nearLimbFlux + self.farLimbFlux
         return self.focusedFlux
+
+
+class ElliotYoung1992ModelTraditional(ElliotYoung1992Model):
+    """EY92 light curve from the traditional half-light parameterization.
+
+    The parameter set the Elliot group has always fit -- and the one the
+    light curve actually constrains: the physical inputs of
+    ElliotYoung1992Model (pressure, temperature, planet mass, molecular
+    mass) enter the model only through (nu0, lambda_g0), so fitting in
+    physical space chases a degeneracy ridge.  Here the atmosphere is
+    specified by the refraction-only half-light point instead:
+
+        radiusHalfLight  r_h : where the refractive flux equals
+            referenceFluxLevel (default 1/2), one limb, no extinction.
+        lambdaHalfLight      : the EQUIVALENT-ISOTHERMAL energy ratio
+            r_h/H_iso at half-light -- the Mathematica jleGroup
+            "lambdaHi" convention, so historical fit values drop in
+            unchanged.  The true energy ratio follows EY92 Eq. (5.13):
+                lambda_true = lambdaHalfLight - (3 a + 5 b)/2
+            (the Mathematica realLam0/realLam0A relation; the two
+            coincide for an isothermal, constant-mu atmosphere).
+        b, a : temperature and molecular-weight exponents [3.3, 3.1].
+
+    nu0 then follows from the flux-level condition [Eqs. 4.26-4.28] and
+    the geometry alone -- no jlegroup.physicalData constants enter.
+    The anchor is always the refraction-only, near-limb flux level, so
+    (r_h, lambdaHalfLight) mean the same thing whether or not twoLimb,
+    haze, or surfaceRadius options are active.
+
+    Derived attributes:
+        lambdaTrueHalfLight    lambda_g(r_h), as above
+        scaleHeight            r_h / lambda_true  (pressure scale height
+                               due to gravity at half-light; the
+                               maintainer's working definition
+                               r_h/(lambdaHiso - 5b/2) at a = 0)
+        isothermalScaleHeight  r_h / lambdaHalfLight  (= H_iso)
+
+    All remaining options (position, planetDistance, haze, twoLimb,
+    surfaceRadius, seriesOrder, seriesVariant) behave exactly as in
+    ElliotYoung1992Model; main() is inherited unchanged.
+    """
+
+    def __init__(
+        self,
+        radiusHalfLight,
+        lambdaHalfLight,
+        b,
+        planetDistance,
+        position,
+        a=0.0,
+        referenceFluxLevel=0.5,
+        hazeOnsetRadius=None,
+        hazeKappa1=None,
+        hazeScaleHeight=None,
+        twoLimb=False,
+        surfaceRadius=None,
+        seriesOrder=MAX_ORDER,
+        seriesVariant="corrected",
+    ):
+        # Geometry, options, and outputs (parent __init__ is bypassed:
+        # it requires the physical inputs this parameterization replaces).
+        self.planetDistance = planetDistance
+        self.position = np.asarray(position, dtype=float)
+        self.a = a
+        self.b = b
+        self.hazeOnsetRadius = hazeOnsetRadius
+        self.hazeKappa1 = hazeKappa1
+        self.hazeScaleHeight = hazeScaleHeight
+        self.twoLimb = twoLimb
+        self.surfaceRadius = surfaceRadius
+        self.seriesOrder = seriesOrder
+        self.seriesVariant = seriesVariant
+
+        # Half-light parameterization -> EY92 (nu0, lambda_g0) at r0 = r_h.
+        self.radiusHalfLight = radiusHalfLight
+        self.lambdaHalfLight = lambdaHalfLight
+        self.referenceFluxLevel = referenceFluxLevel
+        lambda_true = lambdaHalfLight - (3.0 * a + 5.0 * b) / 2.0  # [5.13]
+        if lambda_true <= 0.0:
+            raise ValueError(
+                "lambdaHalfLight - (3a+5b)/2 must be positive; got "
+                f"{lambda_true} (lambdaHalfLight={lambdaHalfLight}, a={a}, b={b})"
+            )
+        self.lambdaTrueHalfLight = lambda_true
+        self.scaleHeight = radiusHalfLight / lambda_true
+        self.isothermalScaleHeight = radiusHalfLight / lambdaHalfLight
+        self.referenceRadius = radiusHalfLight
+        self.lambda_g0 = lambda_true
+        self.nu0 = refractivity_at_flux_level(
+            radiusHalfLight, referenceFluxLevel, planetDistance,
+            lambda_true, a, b, seriesOrder, seriesVariant,
+        )
+
+        self.planetRadius_solution = None  # near-limb r(rho) per position, km
+        self.farPlanetRadius_solution = None  # far-limb r, km (twoLimb only)
+        self.theta = None  # near-limb bending angle, rad
+        self.dtheta = None  # near-limb dtheta/dr, rad/km
+        self.tauObs = None  # near-limb haze optical depth
+        self.transmission = None  # near-limb exp(-tau)
+        self.unfocusedFlux = None  # near-limb cylindrical flux
+        self.nearLimbFlux = None
+        self.farLimbFlux = None  # twoLimb only
+        self.focusedFlux = None  # total model flux
+
+
+class ElliotYoung1992ModelTraditionalScaleHeight(ElliotYoung1992ModelTraditional):
+    """Traditional half-light parameterization with the scale height as
+    the atmosphere-strength parameter instead of lambdaHalfLight.
+
+        scaleHeightH : the pressure(-gravity) scale height at the
+            half-light radius, km:
+                scaleHeightH = r_h / lambda_true,
+                lambda_true  = lambdaHalfLight - (3a+5b)/2
+            (so lambdaHalfLight = r_h/scaleHeightH + (3a+5b)/2 is
+            reconstructed internally and everything else follows
+            ElliotYoung1992ModelTraditional unchanged).
+
+    Useful when fitting: the scale height is often the physically
+    stable quantity, so one holds scaleHeightH fixed while
+    radiusHalfLight floats against the data -- in (rH, lambdaHiso)
+    space that constraint couples both parameters, here it is a single
+    frozen one.  The inherited `scaleHeight` attribute equals
+    scaleHeightH by construction.
+    """
+
+    def __init__(
+        self,
+        radiusHalfLight,
+        scaleHeightH,
+        b,
+        planetDistance,
+        position,
+        a=0.0,
+        referenceFluxLevel=0.5,
+        hazeOnsetRadius=None,
+        hazeKappa1=None,
+        hazeScaleHeight=None,
+        twoLimb=False,
+        surfaceRadius=None,
+        seriesOrder=MAX_ORDER,
+        seriesVariant="corrected",
+    ):
+        if scaleHeightH <= 0.0:
+            raise ValueError(f"scaleHeightH must be positive, got {scaleHeightH}")
+        self.scaleHeightH = scaleHeightH
+        lambda_iso = radiusHalfLight / scaleHeightH + (3.0 * a + 5.0 * b) / 2.0
+        super().__init__(
+            radiusHalfLight=radiusHalfLight,
+            lambdaHalfLight=lambda_iso,
+            b=b,
+            planetDistance=planetDistance,
+            position=position,
+            a=a,
+            referenceFluxLevel=referenceFluxLevel,
+            hazeOnsetRadius=hazeOnsetRadius,
+            hazeKappa1=hazeKappa1,
+            hazeScaleHeight=hazeScaleHeight,
+            twoLimb=twoLimb,
+            surfaceRadius=surfaceRadius,
+            seriesOrder=seriesOrder,
+            seriesVariant=seriesVariant,
+        )
