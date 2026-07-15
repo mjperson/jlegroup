@@ -1,0 +1,4 @@
+# sdist-only additions (wheels are governed by [tool.setuptools.package-data]).
+# Ship the validation reference data so the sdist's test suite actually runs:
+# the tests are the package's provenance record and must not ship broken.
+recursive-include tests/data *
