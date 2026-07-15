@@ -100,9 +100,16 @@ from datetime import datetime as _datetime, timedelta as _timedelta
 from importlib import resources
 
 import numpy as np
-from astropy import units as u
-from astropy.coordinates import ITRS, Angle, SkyCoord, get_sun
-from astropy.time import Time
+
+try:
+    from astropy import units as u
+    from astropy.coordinates import ITRS, Angle, SkyCoord, get_sun
+    from astropy.time import Time
+except ImportError as exc:  # pragma: no cover - exercised only without the extra
+    raise ImportError(
+        "jlegroup.shadowmap requires the optional dependency astropy; "
+        "install it with:  pip install \"jlegroup[shadowmap]\""
+    ) from exc
 
 from . import physicalData
 

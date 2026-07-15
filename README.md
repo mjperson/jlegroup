@@ -10,7 +10,8 @@ and mentor to this package's maintainer.*
 | `jlegroup.CE97` | Chamberlain & Elliot (1997), PASP 109, 1170 — numerical light curves from an arbitrary atmospheric model | ✅ implemented & validated |
 | `jlegroup.EY92` | Elliot & Young (1992), AJ 103, 991 — analytic small-planet model with haze, two-limb/central flash, surface cutoff, and the traditional half-light fitting parameterizations (r_h, λ_iso) / (r_h, H) | ✅ implemented & validated |
 | `jlegroup.EPQ03` | Elliot, Person & Qu (2003), AJ 126, 1041 — light-curve **inversion** & atmospheric retrieval with error propagation | ✅ implemented & validated |
-| `jlegroup.physicalData` | constants mirroring the Mathematica ``jleGroup`physicalData`` (CODATA-1986 vintage, test-pinned, with provenance records) + the EY92 Table 9 gas registry, multi-gas dispersion formulas (N₂, H₂, Ar, CO₂, He, 85/15 H₂–He "Uranus"), and an occultation-target body registry (Pluto, Triton, Sun) | ✅ |
+| `jlegroup.physicalData` | constants mirroring the Mathematica ``jleGroup`physicalData`` (CODATA-1986 vintage, test-pinned, with provenance records) + the EY92 Table 9 gas registry, multi-gas dispersion formulas (N₂, H₂, Ar, CO₂, He, 85/15 H₂–He "Uranus"), and an occultation-target body registry (Earth, Pluto, Triton, Sun) | ✅ |
+| `jlegroup.shadowmap` | occultation **shadow maps** — the Earth seen from the occulting body with coastlines, night shading, fundamental-plane track bands and ground paths, plus the `smDist`/`smOffset` prediction workflow (functionality of Mathematica ``jleGroup`shadowMap`` 4.1.4; no reference publication). Optional: `pip install "jlegroup[shadowmap]"` (astropy); loads lazily | ✅ implemented & validated |
 
 **Naming convention:** all-lowercase `jlegroup` is this Python package; camelCase
 `jleGroup` refers to the original Mathematica package family used within the group.
@@ -32,6 +33,11 @@ pip install git+https://github.com/mjperson/jlegroup.git
 
 # or, for development, from a checkout:
 pip install -e ".[test]"
+
+# shadow maps are an optional extra (adds astropy; the light-curve
+# modules work without it):
+pip install "jlegroup[shadowmap] @ git+https://github.com/mjperson/jlegroup.git"
+pip install -e ".[test,shadowmap]"        # development equivalent
 ```
 
 Requires Python ≥ 3.10 and numpy ≥ 2.0.
@@ -66,6 +72,7 @@ bundled reference light curve.
 | [`01_EY92_basics.ipynb`](examples/01_EY92_basics.ipynb) | analytic model: parameters, series order & misprint corrections, haze, two-limb central flash, traditional fitting parameterizations |
 | [`02_CE97_basics.ipynb`](examples/02_CE97_basics.ipynb) | numerical model: atmosphere builders, time-domain curves + noise, validation vs bundled references, the atmosphere-top clamp idiom |
 | [`03_EPQ03_basics.ipynb`](examples/03_EPQ03_basics.ipynb) | inversion: noiseless round trip, noisy retrieval, the EPQ03 error budget, thermal gradients |
+| [`04_shadowmap_basics.ipynb`](examples/04_shadowmap_basics.ipynb) | shadow maps on the 2015-06-29 Pluto event: globe / mercator / equirectangular views, night shading, track bands + ground paths, `smDist`/`smOffset` (needs the `shadowmap` extra) |
 
 ## Validation
 

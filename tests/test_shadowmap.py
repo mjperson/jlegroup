@@ -41,7 +41,9 @@ import os
 import numpy as np
 import pytest
 
-from astropy.utils import iers
+pytest.importorskip("astropy", reason="shadowmap extra not installed")
+
+from astropy.utils import iers  # noqa: E402
 
 iers.conf.auto_download = False
 iers.conf.iers_degraded_accuracy = "warn"
