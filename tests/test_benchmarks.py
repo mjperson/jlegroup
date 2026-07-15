@@ -51,7 +51,10 @@ def _load(case):
 
 
 def run_case(radius, numdens, t):
-    nu = physicalData.refractivity(numdens, gas="N2", wavelength_um=LAMBDA_UM)
+    # Validation vintage: the references were generated with the jleGroup
+    # CODATA-1986 Loschmidt; keeps the README residuals exact.
+    nu = physicalData.refractivity(numdens, gas="N2", wavelength_um=LAMBDA_UM,
+                                   constants=physicalData.CODATA1986)
     position = np.sqrt(B_KM**2 + (V_KMS * t) ** 2)
     model = CE97.ChamberlainElliot1997Model(
         refractivityProfile=nu,

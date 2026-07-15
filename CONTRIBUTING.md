@@ -30,13 +30,19 @@ fine if documented in the commit message.
 
 - **One module per method**, src-layout: your method lands as `src/jlegroup/<NAME>.py`
   and is registered with a `from . import <NAME>` line in `src/jlegroup/__init__.py`.
-- **All physical constants and refractivity conversions come from
-  `jlegroup.physicalData`.** These are deliberately CODATA-1986 vintage with the
-  Peck & Khanna (1966) N₂ refractivity at 1 atm Loschmidt — matching the Mathematica
-  jleGroup package and every validation reference in this repo. Do not hardcode modern
-  CODATA values, do not use polarizability-based (2πα·n) refractivity, and do not use
-  1-bar "STP". A ~1% constants mismatch produced a spurious ~1.5×10⁻³ light-curve
-  discrepancy during CE97 validation; this is the #1 integration trap.
+- **All physical constants come from `jlegroup.physicalData`, injected via
+  `constants=` (a `ConstantSet`).** Never hardcode values. Two immutable vintages
+  exist: `CODATA2022` (= `DEFAULT_CONSTANTS`, what every model uses unless told
+  otherwise) and `CODATA1986` (the Mathematica jleGroup vintage — the verification
+  mode). **Any test that compares against a Mathematica reference or a published
+  table must pass `constants=CODATA1986`**: the dominant vintage difference is G at
+  +2.6×10⁻⁴, far above reference-comparison tolerances. New models should accept and
+  forward a `constants=` keyword defaulting to `physicalData.DEFAULT_CONSTANTS`, and
+  state in their delivery which quantities are vintage-sensitive. Refractivity
+  conversions use the 1-atm Loschmidt convention (`physicalData.refractivity`) — do
+  not use polarizability-based (2πα·n) refractivity or 1-bar "STP" states. (History:
+  a ~1% STP-convention mismatch once produced a spurious ~1.5×10⁻³ light-curve
+  discrepancy, and was the #1 integration trap until the conversions were unified.)
 - **Units** (match CE97 so methods are drop-in comparable): radii, distances, and
   observer-plane positions in **km**; pressures in **Pa**; number density in **m⁻³**;
   temperatures in **K**; molar mass in **kg/mol**; refractivity dimensionless; output is

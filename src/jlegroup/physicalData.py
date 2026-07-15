@@ -1,11 +1,25 @@
-"""Physical constants and shared gas data for jlegroup, mirroring the Mathematica
-``jleGroup`physicalData`` package.
+"""Physical constants and shared gas data for jlegroup.
 
-Vintage matters: the Mathematica package — and therefore every reference light curve used
-to validate this code — uses CODATA-1986 values. Do NOT "upgrade" these to current CODATA
-without revalidating the benchmark suite; a relative change of a few 1e-4 in a constant is
-detectable at the accuracy this package is validated to. The pinned values are enforced
-by tests/test_physicalData.py.
+TWO VINTAGES, ONE SWITCH (design adopted 2026-07-15). Fundamental constants come in
+two immutable ``ConstantSet`` bundles:
+
+    CODATA2022 — current values (several exact by the 2019 SI redefinition). The
+        module-level names (BOLTZMANN, GRAVITATIONAL, ...) carry THESE values, and
+        DEFAULT_CONSTANTS points here: research use gets current physics by default.
+    CODATA1986 — the vintage of the Mathematica ``jleGroup`physicalData`` package and
+        therefore of EVERY reference light curve and paper table this code is
+        validated against (records archived in VINTAGE_1986). This is the
+        VERIFICATION mode: any comparison against a Mathematica reference or a
+        published table must pass ``constants=CODATA1986``.
+
+Every model constructor and conversion helper accepts ``constants=`` and defaults to
+DEFAULT_CONSTANTS. The dominant difference between vintages is G (+2.56e-4 relative,
+1986 -> 2022); everything else moves by <~1e-5. Both vintages are test-pinned
+(tests/test_physicalData.py); neither set's values may ever drift. What does NOT
+participate in the vintage switch: measured quantities with their own provenance —
+the Table-9 passband refractivities (GASES), the dispersion formulas, and the BODIES
+registry. (Note GM values are measured directly and are G-independent; masses derived
+as GM/G inherit the G vintage.)
 
 Design (adopted 2026-07-08 from the EY92 development effort's constants module): every
 universal constant is a ``Constant`` — a float subclass carrying symbol, units, 1-sigma
@@ -14,9 +28,9 @@ while their provenance travels with them. Policy: no bare numeric literals for p
 constants in other modules; take them from here (method-specific paper-reproduction sets,
 e.g. ``EPQ03.EPQ03_TABLE10``, are the documented exception and live with their method).
 
-Mapping to the Mathematica package:
-    BOLTZMANN   = pdBoltzmannConstant[2]
-    LOSCHMIDT   = pdLoschmidtNumber[3]
+Mapping to the Mathematica package (the 1986 archive, NOT the module defaults):
+    VINTAGE_1986["BOLTZMANN"]   = pdBoltzmannConstant[2]
+    VINTAGE_1986["LOSCHMIDT"]   = pdLoschmidtNumber[3]
     refractivitySTP("N2", lambda) ~ pdRefractivityAtSTP["N2", 1, lambda]
 
 Two refractivity conventions coexist deliberately — do not "reconcile" them:
@@ -57,6 +71,9 @@ __all__ = [
     "BODIES",
     "ConstantSet",
     "CODATA1986",
+    "CODATA2022",
+    "DEFAULT_CONSTANTS",
+    "VINTAGE_1986",
     "REFRACTIVITY_SOURCES",
     "refractivitySTP",
     "refractivity",
@@ -88,65 +105,91 @@ class Constant(float):
         return f"Constant({float(self)!r}, symbol={self.symbol!r}, units={self.units!r})"
 
 
-# --- CODATA 1986 vintage (jleGroup`physicalData) ------------------------------------
+# --- CODATA-1986 / jleGroup validation vintage (FROZEN ARCHIVE) ----------------------
+# These are the values the Mathematica jleGroup package carries and therefore the
+# vintage every reference light curve and paper table was generated with. They are
+# permanently frozen here (test-pinned) and exposed as the CODATA1986 ConstantSet —
+# the package's VERIFICATION mode. Never edit these records.
 
-BOLTZMANN = Constant(
-    1.380658e-23,
-    symbol="k_B",
-    units="J/K",
-    uncertainty=0.000012e-23,
-    source="CODATA 1986 (Cohen & Taylor 1987, Rev. Mod. Phys. 59, 1121); adopted "
-           "by jleGroup`physicalData as pdBoltzmannConstant[2]",
-    note="1986 recommended value 1.380658(12)e-23. Exact SI (2019) value is "
-         "1.380649e-23; kept at 1986 vintage for benchmark consistency.",
-)
-
-GRAVITATIONAL = Constant(
-    6.67259e-11,
-    symbol="G",
-    units="m^3 kg^-1 s^-2",
-    uncertainty=0.00085e-11,
-    source="CODATA 1986 (Cohen & Taylor 1987, Rev. Mod. Phys. 59, 1121); adopted "
-           "by jleGroup`physicalData",
-    note="1986 recommended value 6.67259(85)e-11.",
-)
-
-AVOGADRO = Constant(
-    6.0221367e23,
-    symbol="N_A",
-    units="mol^-1",
-    uncertainty=0.0000036e23,
-    source="CODATA 1986 (Cohen & Taylor 1987, Rev. Mod. Phys. 59, 1121); adopted "
-           "by jleGroup`physicalData",
-    note="1986 recommended value 6.0221367(36)e23.",
-)
-
-LOSCHMIDT = Constant(
-    2.686763e25,
-    symbol="L",
-    units="m^-3",
-    uncertainty=0.000023e25,
-    source="CODATA 1986 (Cohen & Taylor 1987, Rev. Mod. Phys. 59, 1121); adopted "
-           "by jleGroup`physicalData as pdLoschmidtNumber[3]",
-    note="Ideal-gas number density at classic STP (273.15 K, 101325 Pa = 1 atm) — "
-         "the reference state gas refractivity tables use. Beware the NIST "
-         "100-kPa 'standard state' variant (~2.6516e25), which is NOT this.",
-)
-
-AU_KM = Constant(
-    1.49597870691e8,
-    symbol="au",
-    units="km",
-    uncertainty=3e-3,
-    source="JPL planetary ephemeris DE-405 (ssd.jpl.nasa.gov); adopted by "
-           "jleGroup`physicalData as pdAstronomicalUnit[3]",
-    note="Adopted ephemeris value; pdError gives 3 m (= 3e-3 km). The SI value "
-         "has been exact by IAU 2012 Resolution B2 definition since 2012 "
-         "(149 597 870.700 km); kept at package vintage for consistency.",
-)
-
-AMU = Constant(
-    1e-3 / float(AVOGADRO),
+VINTAGE_1986 = {
+    "BOLTZMANN": Constant(
+        1.380658e-23,
+        symbol="k_B",
+        units="J/K",
+        uncertainty=0.000012e-23,
+        source="CODATA 1986 (Cohen & Taylor 1987, Rev. Mod. Phys. 59, 1121); adopted "
+               "by jleGroup`physicalData as pdBoltzmannConstant[2]",
+        note="1986 recommended value 1.380658(12)e-23. Exact SI (2019) value is "
+             "1.380649e-23; frozen at 1986 vintage for benchmark verification.",
+    ),
+    "GRAVITATIONAL": Constant(
+        6.67259e-11,
+        symbol="G",
+        units="m^3 kg^-1 s^-2",
+        uncertainty=0.00085e-11,
+        source="CODATA 1986 (Cohen & Taylor 1987, Rev. Mod. Phys. 59, 1121); adopted "
+               "by jleGroup`physicalData",
+        note="1986 recommended value 6.67259(85)e-11.",
+    ),
+    "AVOGADRO": Constant(
+        6.0221367e23,
+        symbol="N_A",
+        units="mol^-1",
+        uncertainty=0.0000036e23,
+        source="CODATA 1986 (Cohen & Taylor 1987, Rev. Mod. Phys. 59, 1121); adopted "
+               "by jleGroup`physicalData",
+        note="1986 recommended value 6.0221367(36)e23.",
+    ),
+    "LOSCHMIDT": Constant(
+        2.686763e25,
+        symbol="L",
+        units="m^-3",
+        uncertainty=0.000023e25,
+        source="CODATA 1986 (Cohen & Taylor 1987, Rev. Mod. Phys. 59, 1121); adopted "
+               "by jleGroup`physicalData as pdLoschmidtNumber[3]",
+        note="Ideal-gas number density at classic STP (273.15 K, 101325 Pa = 1 atm) — "
+             "the reference state gas refractivity tables use. Beware the NIST "
+             "100-kPa 'standard state' variant (~2.6516e25), which is NOT this.",
+    ),
+    "AU_KM": Constant(
+        1.49597870691e8,
+        symbol="au",
+        units="km",
+        uncertainty=3e-3,
+        source="JPL planetary ephemeris DE-405 (ssd.jpl.nasa.gov); adopted by "
+               "jleGroup`physicalData as pdAstronomicalUnit[3]",
+        note="Adopted ephemeris value; pdError gives 3 m (= 3e-3 km).",
+    ),
+    "SPEED_OF_LIGHT": Constant(
+        2.99792458e8,
+        symbol="c",
+        units="m/s",
+        uncertainty=None,
+        source="Exact by SI definition (17th CGPM, 1983); adopted by "
+               "jleGroup`physicalData as pdSpeedOfLight[2]",
+        note="Exact: defines the metre.",
+    ),
+    "PLANCK": Constant(
+        6.6260755e-34,
+        symbol="h",
+        units="J s",
+        uncertainty=4.0e-40,
+        source="CODATA 1986 (Cohen & Taylor 1987, Rev. Mod. Phys. 59, 1121); adopted "
+               "by jleGroup`physicalData as pdPlanckConstant[2]",
+        note="1986 recommended value 6.6260755(40)e-34.",
+    ),
+    "STEFAN_BOLTZMANN": Constant(
+        5.67051e-8,
+        symbol="sigma_SB",
+        units="W m^-2 K^-4",
+        uncertainty=1.9e-12,
+        source="CODATA 1986 (Cohen & Taylor 1987, Rev. Mod. Phys. 59, 1121); adopted "
+               "by jleGroup`physicalData as pdStefanBoltzmannConstant[2]",
+        note="1986 recommended value 5.67051(19)e-8.",
+    ),
+}
+VINTAGE_1986["AMU"] = Constant(
+    1e-3 / float(VINTAGE_1986["AVOGADRO"]),
     symbol="m_amu",
     units="kg",
     uncertainty=None,
@@ -156,35 +199,100 @@ AMU = Constant(
          "at printed precision.",
 )
 
+
+# --- CODATA-2022 / SI-2019 vintage (MODULE DEFAULT) -----------------------------------
+# Current recommended values, for current research. Several are exact by the 2019
+# SI redefinition. The validation references were NOT generated with these — pass
+# constants=CODATA1986 when reproducing them (see module docstring).
+
+BOLTZMANN = Constant(
+    1.380649e-23,
+    symbol="k_B",
+    units="J/K",
+    uncertainty=None,
+    source="Exact by SI definition (26th CGPM, 2019) / CODATA 2022",
+    note="Exact: defines the kelvin. (Validation vintage: 1.380658e-23.)",
+)
+
+GRAVITATIONAL = Constant(
+    6.67430e-11,
+    symbol="G",
+    units="m^3 kg^-1 s^-2",
+    uncertainty=0.00015e-11,
+    source="CODATA 2022 (identical to CODATA 2018)",
+    note="2022 recommended value 6.67430(15)e-11 — a +2.56e-4 relative shift from "
+         "the 1986 validation vintage; the largest single-vintage effect in this "
+         "package.",
+)
+
+AVOGADRO = Constant(
+    6.02214076e23,
+    symbol="N_A",
+    units="mol^-1",
+    uncertainty=None,
+    source="Exact by SI definition (26th CGPM, 2019) / CODATA 2022",
+    note="Exact: defines the mole.",
+)
+
+LOSCHMIDT = Constant(
+    2.686780111e25,
+    symbol="L",
+    units="m^-3",
+    uncertainty=None,
+    source="CODATA 2022 n_0 (273.15 K, 101325 Pa); exactly derivable as "
+           "p/(k_B T) with the exact SI k_B",
+    note="Ideal-gas number density at classic STP (273.15 K, 101325 Pa = 1 atm). "
+         "Beware the NIST 100-kPa 'standard state' variant (~2.6516e25), which "
+         "is NOT this.",
+)
+
+AU_KM = Constant(
+    1.495978707e8,
+    symbol="au",
+    units="km",
+    uncertainty=None,
+    source="IAU 2012 Resolution B2",
+    note="Exact by definition (149 597 870.700 km) since 2012.",
+)
+
+AMU = Constant(
+    1e-3 / float(AVOGADRO),
+    symbol="m_amu",
+    units="kg",
+    uncertainty=None,
+    source="Derived: (1e-3 kg/mol) / N_A with the exact SI Avogadro above",
+    note="Molar-mass-constant convention (M_u = 1e-3 kg/mol, exact to ~1e-9 "
+         "since SI-2019); CODATA-2022 measured m_u = 1.66053906892(52)e-27 kg "
+         "differs only at that level. Derived here so the set is internally "
+         "consistent, mirroring the 1986 set's convention.",
+)
+
 SPEED_OF_LIGHT = Constant(
     2.99792458e8,
     symbol="c",
     units="m/s",
     uncertainty=None,
-    source="Exact by SI definition (17th CGPM, 1983); adopted by "
-           "jleGroup`physicalData as pdSpeedOfLight[2]",
-    note="Exact: defines the metre.",
+    source="Exact by SI definition (17th CGPM, 1983)",
+    note="Exact: defines the metre. Identical in both vintages.",
 )
 
 PLANCK = Constant(
-    6.6260755e-34,
+    6.62607015e-34,
     symbol="h",
     units="J s",
-    uncertainty=4.0e-40,
-    source="CODATA 1986 (Cohen & Taylor 1987, Rev. Mod. Phys. 59, 1121); adopted "
-           "by jleGroup`physicalData as pdPlanckConstant[2]",
-    note="1986 recommended value 6.6260755(40)e-34. Exact SI (2019) value is "
-         "6.62607015e-34; kept at package vintage for consistency.",
+    uncertainty=None,
+    source="Exact by SI definition (26th CGPM, 2019) / CODATA 2022",
+    note="Exact: defines the kilogram.",
 )
 
 STEFAN_BOLTZMANN = Constant(
-    5.67051e-8,
+    5.670374419e-8,
     symbol="sigma_SB",
     units="W m^-2 K^-4",
-    uncertainty=1.9e-12,
-    source="CODATA 1986 (Cohen & Taylor 1987, Rev. Mod. Phys. 59, 1121); adopted "
-           "by jleGroup`physicalData as pdStefanBoltzmannConstant[2]",
-    note="1986 recommended value 5.67051(19)e-8.",
+    uncertainty=None,
+    source="CODATA 2022; exactly derivable as 2 pi^5 k_B^4 / (15 h^3 c^2) from "
+           "the exact SI constants",
+    note="Exact (derived).",
 )
 
 
@@ -291,13 +399,19 @@ BODIES = {
 
 @dataclass(frozen=True)
 class ConstantSet:
-    """The four physical constants the method equations use, as one injectable
-    bundle (e.g. ``EPQ03.invert_light_curve(..., constants=...)``).
+    """The physical constants the method equations use, as one injectable
+    bundle (e.g. ``EPQ03.invert_light_curve(..., constants=...)``). This is
+    the package's vintage switch: pass ``CODATA2022`` (the default) for
+    current research, ``CODATA1986`` to reproduce the validation references.
 
     gravitational : G, m^3 kg^-1 s^-2
     boltzmann : k, J/K
     loschmidt : L, m^-3 (number density at STP)
     amu : atomic mass unit, kg
+
+    Derived (molar-mass-constant convention, M_u = 1e-3 kg/mol):
+    avogadro : N_A = 1e-3 / amu, mol^-1
+    gas_constant : R = k N_A, J mol^-1 K^-1
     """
 
     name: str
@@ -306,15 +420,36 @@ class ConstantSet:
     loschmidt: float
     amu: float
 
+    @property
+    def avogadro(self):
+        return 1e-3 / self.amu
 
-#: The package-default set (this module's CODATA-1986 vintage values).
+    @property
+    def gas_constant(self):
+        return self.boltzmann * (1e-3 / self.amu)
+
+
+#: VERIFICATION vintage: the values the Mathematica jleGroup package and every
+#: validation reference were generated with. Frozen forever; test-pinned.
 CODATA1986 = ConstantSet(
-    name="CODATA-1986 (jlegroup.physicalData)",
+    name="CODATA-1986 (jleGroup validation vintage)",
+    gravitational=VINTAGE_1986["GRAVITATIONAL"],
+    boltzmann=VINTAGE_1986["BOLTZMANN"],
+    loschmidt=VINTAGE_1986["LOSCHMIDT"],
+    amu=VINTAGE_1986["AMU"],
+)
+
+#: CURRENT vintage (the package default): CODATA-2022 / SI-2019 exact values.
+CODATA2022 = ConstantSet(
+    name="CODATA-2022 / SI-2019 (package default)",
     gravitational=GRAVITATIONAL,
     boltzmann=BOLTZMANN,
     loschmidt=LOSCHMIDT,
-    amu=1e-3 / AVOGADRO,
+    amu=AMU,
 )
+
+#: What every model in the package uses when no ``constants=`` is passed.
+DEFAULT_CONSTANTS = CODATA2022
 
 
 # --- Refractivity conversions ----------------------------------------------------------
@@ -409,10 +544,16 @@ def refractivitySTP(gas="N2", wavelength_um=0.7, reference=0):
     return formula(wavelength_um)
 
 
-def refractivity(number_density, gas="N2", wavelength_um=0.7, reference=0):
+def refractivity(number_density, gas="N2", wavelength_um=0.7, reference=0,
+                 constants=None):
     """Refractivity profile nu(r) from a number-density profile [m^-3]:
 
-        nu(r) = nu_STP(gas, lambda) * n(r) / LOSCHMIDT
+        nu(r) = nu_STP(gas, lambda) * n(r) / L
+
+    with L from ``constants`` (default DEFAULT_CONSTANTS; pass
+    ``constants=CODATA1986`` when reproducing validation references).
     """
+    if constants is None:
+        constants = DEFAULT_CONSTANTS
     return (refractivitySTP(gas, wavelength_um, reference)
-            / LOSCHMIDT * number_density)
+            / constants.loschmidt * number_density)

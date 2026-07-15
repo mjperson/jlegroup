@@ -9,11 +9,40 @@ public release.
 
 ## [Unreleased]
 
-- Release engineering ahead of public deployment: CI matrix (Python 3.10–3.13 on
-  Ubuntu + 3.13 on macOS), sdist now ships `tests/data/` via MANIFEST.in (a
-  pytest run from the sdist was failing on missing reference data), build/twine
-  verified, metadata polish (shadowMap in description, Beta classifier).
-- This CHANGELOG.
+## [0.10.0] — 2026-07-15 — The Great Constant Migration
+
+**Two vintages, one switch — and modern values by default.**
+Outputs of vintage-sensitive quantities change by up to **+2.6×10⁻⁴** (the
+1986→2022 shift in G); everything else moves by ≲10⁻⁵.
+
+- `physicalData` now carries **two immutable, test-pinned `ConstantSet`
+  vintages**: `CODATA2022` (current values, several SI-exact; module-level
+  names and `DEFAULT_CONSTANTS` point here) and `CODATA1986` (the Mathematica
+  ``jleGroup`physicalData`` vintage of every validation reference, archived in
+  `VINTAGE_1986`). Measured data (Table-9 refractivities, dispersion formulas,
+  `BODIES`) do not participate in the switch.
+- **Every model takes `constants=`** and defaults to `DEFAULT_CONSTANTS`:
+  `EY92.ElliotYoung1992Model`, the three `CE97` Atmosphere builders (new), and
+  all `EPQ03` entry points (defaults flipped from `CODATA1986`). The EY92
+  traditional half-light classes are constants-free by construction.
+- **CE97 Atmosphere migration**: the three builder classes' hardcoded R/G/k_B
+  (2014–2018 vintages) are replaced by the injected set, and the internal
+  refractivity conversion moves from a 1-bar reference state to the package's
+  1-atm Loschmidt — the class `Refractivity` column now equals
+  `physicalData.refractivity()` **exactly**, closing the long-documented
+  ~1.3% "class-internal refractivity" gotcha. (Characterized migration:
+  temperature columns unchanged, pressure/density ≤2×10⁻⁵, ν column ×0.98692.)
+- **Validation is vintage-pinned**: every comparison against Mathematica
+  references or paper tables passes `constants=CODATA1986`, so all published
+  validation numbers (4.244×10⁻⁵ iso-clear, etc.) are unchanged and now
+  vintage-explicit. New `tests/test_CE97_atmosphere.py`; both vintages pinned
+  in `tests/test_physicalData.py`. 211 tests.
+
+Earlier release engineering (unreleased at the time): CI matrix (Python
+3.10–3.13 on Ubuntu + 3.13 on macOS), sdist ships `tests/data/` via
+MANIFEST.in (a pytest run from the sdist was failing on missing reference
+data), build/twine verified, metadata polish, retroactive tags v0.1.0–v0.9.0,
+and this CHANGELOG.
 
 ## [0.9.0] — 2026-07-14 (`cac2f53`)
 

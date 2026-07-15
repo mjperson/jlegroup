@@ -254,6 +254,9 @@ def _ey92_model_for_case(case, order):
         position=position,
         temperatureExponent=CASE_EXPONENT[case],
         seriesOrder=order,
+        # The references were generated at the jleGroup CODATA-1986 vintage;
+        # the package default is CODATA-2022 (G differs by 2.56e-4).
+        constants=physicalData.CODATA1986,
     )
     return model, ref
 

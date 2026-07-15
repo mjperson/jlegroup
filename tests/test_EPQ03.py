@@ -73,7 +73,7 @@ def noisy_result(snr_h=100.0, seed=0, use_fit=True, y_bottom=440.0,
     rng = np.random.default_rng(seed)
     noisy, sig = add_noise(phi, sigma, rng)
     return invert_light_curve(
-        y, noisy, sig, d=ATM.d, gas=ATM.gas, m_p=ATM.mass(CODATA1986),
+        y, noisy, sig, d=ATM.d, gas=ATM.gas, m_p=ATM.mass(CODATA1986), constants=CODATA1986,
         boundary=None if use_fit else standard_true_boundary(),
         order=ATM.order, i_b=i_b, fit_params=fit_params,
     )
@@ -564,7 +564,7 @@ def model_boundary(atm, **kw):
 def run_standard(atm=STANDARD_CASE, y_bottom=440.0, use_fit=False, **kw):
     y, phi = generate_light_curve(atm, 1600.0, y_bottom)
     return invert_light_curve(
-        y, phi, d=atm.d, gas=atm.gas, m_p=atm.mass(CODATA1986),
+        y, phi, d=atm.d, gas=atm.gas, m_p=atm.mass(CODATA1986), constants=CODATA1986,
         boundary=None if use_fit else model_boundary(atm),
         order=atm.order, **kw,
     )
@@ -765,7 +765,7 @@ def test_noiseless_boundary_uncertainty_only():
     """With noiseless fluxes, only the boundary term contributes."""
     y, phi = generate_light_curve(ATM, 1600.0, 440.0)
     res = invert_light_curve(
-        y, phi, d=ATM.d, gas=ATM.gas, m_p=ATM.mass(CODATA1986),
+        y, phi, d=ATM.d, gas=ATM.gas, m_p=ATM.mass(CODATA1986), constants=CODATA1986,
         boundary=standard_true_boundary(), order=ATM.order,
     )
     budget = propagate_errors(
@@ -915,7 +915,7 @@ def test_formal_errors_scale_inversely_with_snr():
         sigma = sigma_from_snr_h(snr, ATM.h_h, 0.5)
         res = invert_light_curve(
             y, phi + sigma * unit, np.full_like(phi, sigma),
-            d=ATM.d, gas=ATM.gas, m_p=ATM.mass(CODATA1986), order=ATM.order,
+            d=ATM.d, gas=ATM.gas, m_p=ATM.mass(CODATA1986), constants=CODATA1986, order=ATM.order,
             i_b=i_b,
         )
         out[snr] = propagate_errors(res)

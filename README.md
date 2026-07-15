@@ -10,7 +10,7 @@ and mentor to this package's maintainer.*
 | `jlegroup.CE97` | Chamberlain & Elliot (1997), PASP 109, 1170 — numerical light curves from an arbitrary atmospheric model | ✅ implemented & validated |
 | `jlegroup.EY92` | Elliot & Young (1992), AJ 103, 991 — analytic small-planet model with haze, two-limb/central flash, surface cutoff, and the traditional half-light fitting parameterizations (r_h, λ_iso) / (r_h, H) | ✅ implemented & validated |
 | `jlegroup.EPQ03` | Elliot, Person & Qu (2003), AJ 126, 1041 — light-curve **inversion** & atmospheric retrieval with error propagation | ✅ implemented & validated |
-| `jlegroup.physicalData` | constants mirroring the Mathematica ``jleGroup`physicalData`` (CODATA-1986 vintage, test-pinned, with provenance records) + the EY92 Table 9 gas registry, multi-gas dispersion formulas (N₂, H₂, Ar, CO₂, He, 85/15 H₂–He "Uranus"), and an occultation-target body registry (Earth, Pluto, Triton, Sun) | ✅ |
+| `jlegroup.physicalData` | physical constants in **two test-pinned vintages** — CODATA-2022/SI (the default, for current research) and CODATA-1986 (the Mathematica ``jleGroup`physicalData`` verification vintage), switched per model via `constants=` — plus the EY92 Table 9 gas registry, multi-gas dispersion formulas (N₂, H₂, Ar, CO₂, He, 85/15 H₂–He "Uranus"), and an occultation-target body registry (Earth, Pluto, Triton, Sun) | ✅ |
 | `jlegroup.shadowmap` | occultation **shadow maps** — the Earth seen from the occulting body with coastlines, night shading, fundamental-plane track bands and ground paths, plus the `smDist`/`smOffset` prediction workflow (functionality of Mathematica ``jleGroup`shadowMap`` 4.1.4; no reference publication). Optional: `pip install "jlegroup[shadowmap]"` (astropy); loads lazily | ✅ implemented & validated |
 
 **Naming convention:** all-lowercase `jlegroup` is this Python package; camelCase
@@ -79,6 +79,9 @@ bundled reference light curve.
 The CE97 implementation is validated against independently generated reference light
 curves (Mathematica `jleGroup` `olcOneLimb2`, EY92 family; λ = 0.7 µm; N₂; 30 AU;
 b = 900 km; v = 25 km/s). These run as the pytest regression suite (`tests/`).
+All validation comparisons run in the references' **CODATA-1986 vintage**
+(`constants=physicalData.CODATA1986`, pinned in the tests); the package's runtime
+default is CODATA-2022 — see Gotchas.
 
 | Case | Temperature profile | max \|model − ref\| |
 |---|---|---|
@@ -125,10 +128,16 @@ sensitivity the paper's error analysis predicts.
   produces a spline edge artifact ~10⁻³ within ~2 scale heights of the boundary).
 - The model sums **all** geometric images found by the y→r mapping; the bundled
   references are one-limb curves (far-limb flux is negligible for the bundled geometry).
-- Constants in `physicalData` are deliberately CODATA-1986 to match the Mathematica
-  package and the validation references — see the module docstring before "fixing" them.
+- **Constants come in two vintages, switched by `constants=`.** Every model defaults to
+  `physicalData.CODATA2022` (current values, several SI-exact) — research use gets
+  current physics. The validation references and paper tables were generated at the
+  Mathematica package's CODATA-1986 vintage: pass `constants=physicalData.CODATA1986`
+  (the frozen, test-pinned verification mode) when reproducing them. The dominant
+  difference is G (+2.6×10⁻⁴ relative); see the `physicalData` docstring. Measured data
+  (Table-9 refractivities, dispersion formulas, `BODIES`) do not participate in the
+  switch. `EY92`'s traditional half-light classes are constants-free by construction.
 - `EY92` defaults to `seriesOrder=4` with corrected Appendix coefficients: pass
-  `seriesOrder=1` to reproduce Mathematica jleGroup curves, and
+  `seriesOrder=1` (and `constants=CODATA1986`) to reproduce Mathematica jleGroup curves, and
   `seriesVariant="as-printed"` for the journal-text coefficients (~10⁻⁶ flux effect).
   Its haze path is validated against the paper tables only. The model is one-limb by
   default: pass `twoLimb=True` for the far limb / central flash, and set

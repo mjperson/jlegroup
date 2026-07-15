@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from scipy import interpolate
 import numdifftools as nd
+from . import physicalData
 from . import ray_crossing as rc
 
 class Atmosphere:
@@ -26,9 +27,10 @@ class Atmosphere:
     def __init__(self,  referencePressure, referenceTemperature,
                  referenceRadius, planetRadius, planetMass,
                  meanMolecularMass, polarizability,
-                 refractivityAtSTP=None, 
+                 refractivityAtSTP=None,
                  temperatureGradient=0, topOfGradient = np.inf,
-                 topOfAtmosphere = np.inf, resolution = 1
+                 topOfAtmosphere = np.inf, resolution = 1,
+                 constants=None
                  ):
         
         '''
@@ -67,10 +69,16 @@ class Atmosphere:
         self.refractivityProfile = None
         self.atmosphericProfile = None
         
-        #Constants
-        self.r0 = 8.31446261815324
-        self.G = 6.6743015*10**(-11)
-        self.kB = 1.38064852*10**(-23)
+        #Constants: injected from jlegroup.physicalData (constants= keyword;
+        #default is the package's current vintage, DEFAULT_CONSTANTS —
+        #pass constants=physicalData.CODATA1986 for verification work).
+        #Replaces the original implementation's hardcoded R/G/kB, 2026-07-15.
+        if constants is None:
+            constants = physicalData.DEFAULT_CONSTANTS
+        self.constants = constants
+        self.r0 = float(constants.gas_constant)
+        self.G = float(constants.gravitational)
+        self.kB = float(constants.boltzmann)
     
     def dP(self, p, r):
     
@@ -152,7 +160,10 @@ class Atmosphere:
         '''Calculate refractivity profile from number density profile'''
         
         if self.polarizability is None:
-            a = self.refractivityAtSTP*self.kB*273.15/10**5
+            #nu per molecule at the 1-atm Loschmidt reference state — the same
+            #convention as physicalData.refractivity (unified 2026-07-15; the
+            #original used a 1-bar state here, ~1.3% high).
+            a = self.refractivityAtSTP/float(self.constants.loschmidt)
             self.refractivityProfile = a*self.numberdensityProfile
             
         else: #in case that the refractivity at STP is given
@@ -180,11 +191,12 @@ class AtmospherefromTprofile:
     '''Generate refractivity profile from temperature-radius profile, given pressure at 
     reference radius.'''
     
-    def __init__(self, referencePressure, referenceRadius, 
+    def __init__(self, referencePressure, referenceRadius,
                  temperatureProfile, radius,
                  planetRadius, planetMass,
                  meanMolecularMass, polarizability,
                  refractivityAtSTP=None,
+                 constants=None,
                  ):
         '''
         referencePressure: float, pressure at reference radius in Pa
@@ -214,10 +226,16 @@ class AtmospherefromTprofile:
         self.refractivityProfile = None
         self.atmosphericProfile = None
         
-        #Constants
-        self.r0 = 8.31446261815324
-        self.G = 6.6743015*10**(-11)
-        self.kB = 1.38064852*10**(-23)
+        #Constants: injected from jlegroup.physicalData (constants= keyword;
+        #default is the package's current vintage, DEFAULT_CONSTANTS —
+        #pass constants=physicalData.CODATA1986 for verification work).
+        #Replaces the original implementation's hardcoded R/G/kB, 2026-07-15.
+        if constants is None:
+            constants = physicalData.DEFAULT_CONSTANTS
+        self.constants = constants
+        self.r0 = float(constants.gas_constant)
+        self.G = float(constants.gravitational)
+        self.kB = float(constants.boltzmann)
     
     def dP(self, p, r):
     
@@ -291,7 +309,10 @@ class AtmospherefromTprofile:
         '''Calculate refractivity profile from number density profile'''
         
         if self.polarizability is None:
-            a = self.refractivityAtSTP*self.kB*273.15/10**5
+            #nu per molecule at the 1-atm Loschmidt reference state — the same
+            #convention as physicalData.refractivity (unified 2026-07-15; the
+            #original used a 1-bar state here, ~1.3% high).
+            a = self.refractivityAtSTP/float(self.constants.loschmidt)
             self.refractivityProfile = a*self.numberdensityProfile
             
         else: #in case that the refractivity at STP is not given
@@ -323,7 +344,8 @@ class AtmospherefromTpProfile:
                  temperatureProfile, pressureProfile,
                  planetRadius, planetMass,
                  meanMolecularMass, polarizability,
-                 refractivityAtSTP=None
+                 refractivityAtSTP=None,
+                 constants=None
                  ):
         
         '''        
@@ -354,10 +376,16 @@ class AtmospherefromTpProfile:
         self.radialDistance = None
         self.atmosphericProfile = None
         
-        #Constants
-        self.r0 = 8.31446261815324
-        self.G = 6.6743015*10**(-11)
-        self.kB = 1.38064852*10**(-23)
+        #Constants: injected from jlegroup.physicalData (constants= keyword;
+        #default is the package's current vintage, DEFAULT_CONSTANTS —
+        #pass constants=physicalData.CODATA1986 for verification work).
+        #Replaces the original implementation's hardcoded R/G/kB, 2026-07-15.
+        if constants is None:
+            constants = physicalData.DEFAULT_CONSTANTS
+        self.constants = constants
+        self.r0 = float(constants.gas_constant)
+        self.G = float(constants.gravitational)
+        self.kB = float(constants.boltzmann)
 
     def dr(self, r, p):
         '''Calculate dr (=dz) for given
@@ -440,7 +468,10 @@ class AtmospherefromTpProfile:
         '''Calculate refractivity profile from number density profile'''
         
         if self.polarizability is None:
-            a = self.refractivityAtSTP*self.kB*273.15/10**5
+            #nu per molecule at the 1-atm Loschmidt reference state — the same
+            #convention as physicalData.refractivity (unified 2026-07-15; the
+            #original used a 1-bar state here, ~1.3% high).
+            a = self.refractivityAtSTP/float(self.constants.loschmidt)
             self.refractivityProfile = a*self.numberdensityProfile
             
         else: #in case that the refractivity at STP is not given

@@ -39,7 +39,9 @@ t = lc["Time (seconds)"].to_numpy(dtype=float)
 flux_ref = lc["Flux (normalized)"].to_numpy(dtype=float)
 
 # ---- forward model ----------------------------------------------------------
-nu = physicalData.refractivity(numdens, gas="N2", wavelength_um=0.7)
+# Validation vintage: the bundled references use the CODATA-1986 Loschmidt.
+nu = physicalData.refractivity(numdens, gas="N2", wavelength_um=0.7,
+                               constants=physicalData.CODATA1986)
 position = np.sqrt(b_km**2 + (v_kms * t) ** 2)
 
 model = CE97.ChamberlainElliot1997Model(

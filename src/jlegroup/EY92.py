@@ -100,7 +100,6 @@ MAX_ORDER = 4
 _VARIANTS = ("corrected", "as-printed")
 
 #: Ideal-gas constant J mol^-1 K^-1 (from the package's CODATA-1986 pair).
-_GAS_CONSTANT = physicalData.BOLTZMANN * physicalData.AVOGADRO
 
 _erf = np.vectorize(math.erf, otypes=[float])
 
@@ -867,6 +866,9 @@ class ElliotYoung1992Model:
         0 is the Baum & Code large-planet limit.  Default 4.
     seriesVariant : "corrected" (default) or "as-printed"; see module
         docstring errata notes.
+    constants : physicalData.ConstantSet, default DEFAULT_CONSTANTS
+        (CODATA-2022). Pass physicalData.CODATA1986 when reproducing the
+        Mathematica references or published tables (their vintage).
     """
 
     def __init__(
@@ -890,6 +892,7 @@ class ElliotYoung1992Model:
         surfaceRadius=None,
         seriesOrder=MAX_ORDER,
         seriesVariant="corrected",
+        constants=None,
     ):
         self.referencePressure = referencePressure
         self.referenceTemperature = referenceTemperature
@@ -908,19 +911,24 @@ class ElliotYoung1992Model:
         self.seriesOrder = seriesOrder
         self.seriesVariant = seriesVariant
 
+        if constants is None:
+            constants = physicalData.DEFAULT_CONSTANTS
+        self.constants = constants
+
         if refractivityAtSTP is None:
             refractivityAtSTP = physicalData.refractivitySTP(gas, wavelength_um)
         self.refractivityAtSTP = refractivityAtSTP
 
         # EY92 (nu0, lambda_g0) from the physical inputs [3.10, 3.15, 3.19].
-        n0 = referencePressure / (physicalData.BOLTZMANN * referenceTemperature)
+        n0 = referencePressure / (constants.boltzmann * referenceTemperature)
         self.referenceNumberDensity = n0
-        self.nu0 = refractivityAtSTP * n0 / physicalData.LOSCHMIDT
+        self.nu0 = refractivityAtSTP * n0 / constants.loschmidt
         self.lambda_g0 = (
-            physicalData.GRAVITATIONAL
+            constants.gravitational
             * planetMass
             * meanMolecularMass
-            / (_GAS_CONSTANT * referenceTemperature * (referenceRadius * 1e3))
+            / (constants.gas_constant * referenceTemperature
+               * (referenceRadius * 1e3))
         )
 
         self.planetRadius_solution = None  # near-limb r(rho) per position, km
@@ -1058,6 +1066,9 @@ class ElliotYoung1992ModelTraditional(ElliotYoung1992Model):
         self.seriesVariant = seriesVariant
 
         # Half-light parameterization -> EY92 (nu0, lambda_g0) at r0 = r_h.
+        # Deliberately constants-free: nu0 comes from the flux-level condition
+        # and geometry alone, so no ConstantSet enters (vintage-independent).
+        self.constants = None
         self.radiusHalfLight = radiusHalfLight
         self.lambdaHalfLight = lambdaHalfLight
         self.referenceFluxLevel = referenceFluxLevel

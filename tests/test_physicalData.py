@@ -1,19 +1,30 @@
-"""physicalData: vintage pins, provenance policy, gas registry, re-exports.
+"""physicalData: two-vintage pins, provenance policy, gas registry, re-exports.
 
-The pinned values ARE the point: this package is validated against references
-generated with the CODATA-1986 / jleGroup`physicalData vintage. A well-meaning
-"upgrade" to current CODATA would silently shift results at the 1e-4 level —
-these tests make that a loud failure instead.
+The pinned values ARE the point. Two immutable vintages coexist:
+CODATA-1986 (the jleGroup validation vintage — every reference light curve
+and paper table was generated with it; archived in VINTAGE_1986 and the
+CODATA1986 set) and CODATA-2022/SI-2019 (the module-level defaults, for
+current research). NEITHER may drift: a silent change in either vintage
+shifts results at up to the 2.6e-4 level (G). These tests make any drift a
+loud failure.
 """
 import numpy as np
 import pytest
 
 from jlegroup import EPQ03, physicalData
-from jlegroup.physicalData import CODATA1986, Constant, GASES, MOLAR_MASS
+from jlegroup.physicalData import (
+    CODATA1986,
+    CODATA2022,
+    DEFAULT_CONSTANTS,
+    VINTAGE_1986,
+    Constant,
+    GASES,
+    MOLAR_MASS,
+)
 
 # --- vintage pins (deliberate; see module docstring before touching) --------
 
-PINNED = {
+PINNED_1986 = {
     "BOLTZMANN": 1.380658e-23,
     "GRAVITATIONAL": 6.67259e-11,
     "AVOGADRO": 6.0221367e23,
@@ -24,16 +35,56 @@ PINNED = {
     "STEFAN_BOLTZMANN": 5.67051e-8,
 }
 
+PINNED_2022 = {
+    "BOLTZMANN": 1.380649e-23,
+    "GRAVITATIONAL": 6.67430e-11,
+    "AVOGADRO": 6.02214076e23,
+    "LOSCHMIDT": 2.686780111e25,
+    "AU_KM": 1.495978707e8,
+    "SPEED_OF_LIGHT": 2.99792458e8,
+    "PLANCK": 6.62607015e-34,
+    "STEFAN_BOLTZMANN": 5.670374419e-8,
+}
 
-@pytest.mark.parametrize("name,value", sorted(PINNED.items()))
-def test_vintage_values_pinned(name, value):
+
+@pytest.mark.parametrize("name,value", sorted(PINNED_1986.items()))
+def test_validation_vintage_pinned(name, value):
+    """The frozen 1986 archive: the values the references were made with."""
+    assert float(VINTAGE_1986[name]) == value
+
+
+@pytest.mark.parametrize("name,value", sorted(PINNED_2022.items()))
+def test_module_defaults_are_codata2022(name, value):
     assert float(getattr(physicalData, name)) == value
+
+
+def test_constant_sets_wire_to_their_vintages():
+    assert DEFAULT_CONSTANTS is CODATA2022
+    assert float(CODATA1986.gravitational) == PINNED_1986["GRAVITATIONAL"]
+    assert float(CODATA1986.boltzmann) == PINNED_1986["BOLTZMANN"]
+    assert float(CODATA1986.loschmidt) == PINNED_1986["LOSCHMIDT"]
+    assert float(CODATA1986.amu) == 1e-3 / PINNED_1986["AVOGADRO"]
+    assert float(CODATA2022.gravitational) == PINNED_2022["GRAVITATIONAL"]
+    assert float(CODATA2022.boltzmann) == PINNED_2022["BOLTZMANN"]
+    assert float(CODATA2022.loschmidt) == PINNED_2022["LOSCHMIDT"]
+    assert float(CODATA2022.amu) == 1e-3 / PINNED_2022["AVOGADRO"]
+
+
+def test_derived_set_properties():
+    """avogadro/gas_constant derive from amu (molar-mass-constant convention)."""
+    assert CODATA1986.avogadro == pytest.approx(PINNED_1986["AVOGADRO"], rel=1e-12)
+    assert CODATA1986.gas_constant == pytest.approx(8.31451, abs=2e-5)  # CODATA-1986 R
+    assert CODATA2022.avogadro == pytest.approx(PINNED_2022["AVOGADRO"], rel=1e-12)
+    # SI-2019 exact R = k_B N_A
+    assert CODATA2022.gas_constant == pytest.approx(8.31446261815324, rel=1e-12)
 
 
 def test_amu_derived_from_avogadro():
     assert float(physicalData.AMU) == 1e-3 / float(physicalData.AVOGADRO)
-    # equals the CODATA-1986 printed value at its precision
-    assert physicalData.AMU == pytest.approx(1.6605402e-27, rel=1e-7)
+    # equals the CODATA-2022 measured m_u at the molar-mass-constant level
+    assert physicalData.AMU == pytest.approx(1.66053906892e-27, rel=2e-9)
+    # and the frozen 1986 record equals the 1986 printed value
+    assert VINTAGE_1986["AMU"] == pytest.approx(1.6605402e-27, rel=1e-7)
 
 
 # --- provenance policy -------------------------------------------------------
@@ -55,8 +106,8 @@ def test_constants_carry_provenance(name):
 
 def test_constants_behave_as_floats_in_arithmetic():
     r_gas = physicalData.BOLTZMANN * physicalData.AVOGADRO
-    assert r_gas == pytest.approx(8.31451, abs=2e-4)  # CODATA-1986 R
-    assert f"{physicalData.BOLTZMANN:.6e}" == "1.380658e-23"
+    assert r_gas == pytest.approx(8.31446261815324, rel=1e-12)  # SI-2019 exact R
+    assert f"{physicalData.BOLTZMANN:.6e}" == "1.380649e-23"
 
 
 def test_loschmidt_consistent_with_ideal_gas_at_classic_stp():
@@ -99,16 +150,20 @@ def test_bandpass_and_monochromatic_n2_are_deliberately_distinct():
 # --- ConstantSet / re-exports --------------------------------------------------
 
 def test_default_constant_set_matches_module_values():
-    assert float(CODATA1986.gravitational) == float(physicalData.GRAVITATIONAL)
-    assert float(CODATA1986.boltzmann) == float(physicalData.BOLTZMANN)
-    assert float(CODATA1986.loschmidt) == float(physicalData.LOSCHMIDT)
-    assert CODATA1986.amu == 1e-3 / float(physicalData.AVOGADRO)
+    """Module-level names carry the DEFAULT (2022) vintage, not 1986."""
+    assert float(CODATA2022.gravitational) == float(physicalData.GRAVITATIONAL)
+    assert float(CODATA2022.boltzmann) == float(physicalData.BOLTZMANN)
+    assert float(CODATA2022.loschmidt) == float(physicalData.LOSCHMIDT)
+    assert CODATA2022.amu == 1e-3 / float(physicalData.AVOGADRO)
+    assert float(CODATA1986.boltzmann) != float(physicalData.BOLTZMANN)
 
 
 def test_epq03_reexports_are_the_same_objects():
     """The consolidation must not fork the constants: EPQ03's names are the
     physicalData objects themselves."""
     assert EPQ03.CODATA1986 is physicalData.CODATA1986
+    assert EPQ03.CODATA2022 is physicalData.CODATA2022
+    assert EPQ03.DEFAULT_CONSTANTS is physicalData.DEFAULT_CONSTANTS
     assert EPQ03.ConstantSet is physicalData.ConstantSet
     assert EPQ03.Gas is physicalData.Gas
     assert EPQ03.GASES is physicalData.GASES

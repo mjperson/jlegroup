@@ -104,11 +104,13 @@ from scipy.integrate import quad_vec
 from scipy.optimize import least_squares
 
 from . import EY92, physicalData
-from .physicalData import CODATA1986, ConstantSet, Gas, GASES
+from .physicalData import CODATA1986, CODATA2022, DEFAULT_CONSTANTS, ConstantSet, Gas, GASES
 
 __all__ = [
     "ConstantSet",
     "CODATA1986",
+    "CODATA2022",
+    "DEFAULT_CONSTANTS",
     "EPQ03_TABLE10",
     "Gas",
     "GASES",
@@ -159,11 +161,13 @@ __all__ = [
 #############################################################################
 # Physical constants and gas data for EPQ03 inversions.
 #
-# The shared pieces — the ``ConstantSet`` injection mechanism, the
-# package-default ``CODATA1986`` set, and the EY92/EPQ03 Table 9 gas
-# registry (``Gas``, ``GASES``) — live in ``jlegroup.physicalData``
-# (consolidated 2026-07-08) and are re-exported here unchanged for the
-# established EPQ03 API.  Method-specific to this module:
+# The shared pieces — the ``ConstantSet`` injection mechanism, the vintage
+# sets (``CODATA2022`` = DEFAULT_CONSTANTS since 2026-07-15, ``CODATA1986``
+# = the validation vintage), and the EY92/EPQ03 Table 9 gas registry
+# (``Gas``, ``GASES``) — live in ``jlegroup.physicalData`` (consolidated
+# 2026-07-08) and are re-exported here unchanged for the established EPQ03
+# API.  Pass ``constants=CODATA1986`` when reproducing paper/reference
+# numbers.  Method-specific to this module:
 #
 # * ``EPQ03_TABLE10`` — the values printed in EPQ03 Table 10, for
 #   digit-level reproduction of the paper's tables.  Note one erratum:
@@ -196,7 +200,7 @@ EPQ03_TABLE10 = ConstantSet(
 )
 
 
-def mass_from_lambda(lambda_h, r_h_km, t_h, mu, constants=CODATA1986):
+def mass_from_lambda(lambda_h, r_h_km, t_h, mu, constants=DEFAULT_CONSTANTS):
     """Body mass M_p (kg) from the half-light energy ratio  [Eq. 60 inverted].
 
     lambda_h = G M_p mu m_amu / (k T_h r_h)  =>  M_p = lambda_h k T_h r_h / (G mu m_amu).
@@ -211,7 +215,7 @@ def mass_from_lambda(lambda_h, r_h_km, t_h, mu, constants=CODATA1986):
     )
 
 
-def lambda_from_mass(m_p, r_h_km, t_h, mu, constants=CODATA1986):
+def lambda_from_mass(m_p, r_h_km, t_h, mu, constants=DEFAULT_CONSTANTS):
     """Half-light energy ratio lambda_h from the body mass  [Eq. 60]."""
     return (
         constants.gravitational
@@ -1043,7 +1047,7 @@ class InversionProfiles:
         return self.pressure / 0.1
 
 
-def invert(grid: ShellGrid, bc, gas, m_p, constants=CODATA1986, epsrel=1e-11,
+def invert(grid: ShellGrid, bc, gas, m_p, constants=DEFAULT_CONSTANTS, epsrel=1e-11,
            r_cut=None):
     """Atmospheric profiles from the shell grid and boundary condition.
 
@@ -1298,7 +1302,7 @@ def invert_light_curve(
     order=2,
     variant="corrected",
     nu_h_method="ey92-4.28",
-    constants=CODATA1986,
+    constants=DEFAULT_CONSTANTS,
     epsrel=1e-11,
 ):
     """Invert a normalized occultation light curve.
@@ -1427,7 +1431,7 @@ class ModelAtmosphere:
             )
         )
 
-    def mass(self, constants: ConstantSet = CODATA1986):
+    def mass(self, constants: ConstantSet = DEFAULT_CONSTANTS):
         """Body mass consistent with (lambda_h, r_h, t_h, mu)  [Eq. 60]."""
         return mass_from_lambda(
             self.lambda_h, self.r_h, self.t_h, self.gas.mu, constants
