@@ -29,6 +29,7 @@ dependencies = [
     "pandas",
     "numdifftools",
     "matplotlib",
+    "astropy",          # shadowmap: time scales, ICRS/TETE->ITRS, get_sun
 ]
 
 [project.optional-dependencies]
@@ -39,3 +40,6 @@ Repository = "https://github.com/mjperson/jlegroup"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+jlegroup = ["data/*.npz"]

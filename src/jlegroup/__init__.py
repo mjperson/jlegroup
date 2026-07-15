@@ -22,5 +22,6 @@ from . import CE97
 from . import EPQ03
 from . import EY92
 from . import physicalData
+from . import shadowmap
 
-__all__ = ["CE97", "EPQ03", "EY92", "physicalData", "__version__"]
+__all__ = ["CE97", "EPQ03", "EY92", "physicalData", "shadowmap", "__version__"]
