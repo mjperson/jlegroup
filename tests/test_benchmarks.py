@@ -63,14 +63,11 @@ def run_case(radius, numdens, t):
         position=position,
     )
     model.main()
-    flux = np.asarray(model.focusedFlux, dtype=float)
-
-    # Rays above the mapped atmosphere top pass through vacuum -> flux = 1 exactly;
-    # the y->r spline would otherwise extrapolate there (spurious caustic spikes).
-    x0 = np.arange(0, radius[-1], model.integrationBin)
-    y_top = radius.max() + D_KM * 2 * np.trapezoid(model.integrandTheta(x0, radius.max()), x0)
-    flux[position > y_top] = 1.0
-    return flux
+    # Rays above the mapped atmosphere top are clamped to flux = 1 (vacuum)
+    # by the model itself since v0.11.0 (the above-atmosphere vacuum clamp;
+    # boundary exposed as model.yTop) — the manual idiom is retired.
+    assert model.yTop is not None and model.yTop > radius.max() - 5.0
+    return np.asarray(model.focusedFlux, dtype=float)
 
 
 @pytest.mark.parametrize(

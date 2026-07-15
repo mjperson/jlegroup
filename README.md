@@ -70,7 +70,7 @@ bundled reference light curve.
 |---|---|
 | [`00_jlegroup_overview.ipynb`](examples/00_jlegroup_overview.ipynb) | the package in one exercise: EY92 ↔ CE97 forward cross-check, then the EPQ03 inversion round trip |
 | [`01_EY92_basics.ipynb`](examples/01_EY92_basics.ipynb) | analytic model: parameters, series order & misprint corrections, haze, two-limb central flash, traditional fitting parameterizations |
-| [`02_CE97_basics.ipynb`](examples/02_CE97_basics.ipynb) | numerical model: atmosphere builders, time-domain curves + noise, validation vs bundled references, the atmosphere-top clamp idiom |
+| [`02_CE97_basics.ipynb`](examples/02_CE97_basics.ipynb) | numerical model: atmosphere builders, time-domain curves + noise, validation vs bundled references, the above-atmosphere vacuum clamp |
 | [`03_EPQ03_basics.ipynb`](examples/03_EPQ03_basics.ipynb) | inversion: noiseless round trip, noisy retrieval, the EPQ03 error budget, thermal gradients |
 | [`04_shadowmap_basics.ipynb`](examples/04_shadowmap_basics.ipynb) | shadow maps on the 2015-06-29 Pluto event: globe / mercator / equirectangular views, night shading, track bands + ground paths, `smDist`/`smOffset` (needs the `shadowmap` extra) |
 
@@ -120,12 +120,15 @@ sensitivity the paper's error analysis predicts.
 
 ## Known behavior / gotchas
 
-- **Positions above the modeled atmosphere top are extrapolated.** The y→r spline only
-  reaches y_top ≈ (top radius) + D·θ(top); beyond that the spline extrapolates and can
-  produce spurious caustic spikes. Physically those rays pass through vacuum → flux = 1:
-  clamp them (see `tests/test_benchmarks.py` or the example for the idiom). Ensure your
-  atmosphere table extends well above the flux-recovery altitude (a truncated top also
-  produces a spline edge artifact ~10⁻³ within ~2 scale heights of the boundary).
+- **Positions above the modeled atmosphere top are vacuum — and clamped (v0.11.0).**
+  The model sets flux = 1 exactly (and θ = 0) beyond yTop = r_top + D·θ(r_top) — the
+  **above-atmosphere vacuum clamp**, boundary exposed as the `yTop` attribute.
+  (Previously the y→r spline extrapolated there, producing spurious caustic spikes;
+  user-side clamping is now a harmless no-op.) Two things remain yours: build the
+  atmosphere table **well above the flux-recovery altitude** — a truncated top leaves a
+  ~10⁻³ spline edge artifact within ~2 scale heights *below* yTop, which no clamp can
+  cure — and note the **deep end is deliberately not clamped** (below the table there
+  is no unique physical answer).
 - The model sums **all** geometric images found by the y→r mapping; the bundled
   references are one-limb curves (far-limb flux is negligible for the bundled geometry).
 - **Constants come in two vintages, switched by `constants=`.** Every model defaults to

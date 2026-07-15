@@ -21,7 +21,7 @@ Naming convention: the all-lowercase ``jlegroup`` is this Python package; the
 camelCase ``jleGroup`` refers to the original Mathematica package family.
 """
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"
 
 from . import CE97
 from . import EPQ03

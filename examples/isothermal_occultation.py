@@ -51,12 +51,9 @@ model = CE97.ChamberlainElliot1997Model(
     position=position,
 )
 model.main()
+# rays above the mapped atmosphere top are clamped to flux = 1 (vacuum) by the
+# model itself since v0.11.0; the boundary is exposed as model.yTop
 flux = np.asarray(model.focusedFlux, dtype=float)
-
-# rays above the mapped atmosphere top pass through vacuum -> flux = 1 exactly
-x0 = np.arange(0, radius[-1], model.integrationBin)
-y_top = radius.max() + D_km * 2 * np.trapezoid(model.integrandTheta(x0, radius.max()), x0)
-flux[position > y_top] = 1.0
 
 # ---- compare ----------------------------------------------------------------
 resid = flux - flux_ref

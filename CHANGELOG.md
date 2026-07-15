@@ -9,6 +9,25 @@ public release.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-07-15 — The above-atmosphere vacuum clamp
+
+- `CE97.ChamberlainElliot1997Model` now clamps positions beyond
+  $y_{top} = r_{top} + D\,\theta(r_{top})$ to **flux = 1 exactly** (and θ = 0):
+  those rays passed above the tabulated atmosphere — vacuum. Previously they
+  were y→r spline extrapolation, the long-documented source of spurious
+  caustic-like spikes, and clamping was a user-side idiom in the tests,
+  example, tutorial, and README. The boundary is exposed as the new `yTop`
+  attribute; noise is applied after the clamp, so simulated baselines stay
+  noisy. User-side clamping remains a harmless no-op.
+- Deliberately **not** clamped: the deep end (below the table there is no
+  unique physical answer), and the truncated-top spline edge artifact just
+  *below* yTop (~10⁻³ within ~2 scale heights on short tables) — build tall
+  tables, as ever.
+- Manual idiom retired from `tests/test_benchmarks.py`,
+  `examples/isothermal_occultation.py`, and tutorial 02 (re-executed). New
+  `tests/test_CE97_vacuum_clamp.py` (7 tests); benchmarks bit-unchanged
+  (iso-clear 4.244×10⁻⁵). 218 tests.
+
 ## [0.10.0] — 2026-07-15 — The Great Constant Migration
 
 **Two vintages, one switch — and modern values by default.**

@@ -493,8 +493,21 @@ class AtmospherefromTpProfile:
                                                 'Refractivity':self.refractivityProfile})
 
 class ChamberlainElliot1997Model:
-    
-    '''Generate normalised light curve using Chamberlain & Elliot 1997'''
+
+    '''Generate normalised light curve using Chamberlain & Elliot 1997.
+
+    The above-atmosphere vacuum clamp (v0.11.0): rays landing beyond
+    yTop = r_top + D*theta(r_top) passed entirely above the tabulated
+    atmosphere, so their flux is exactly 1 (vacuum) and theta = 0; the
+    model clamps them (they were previously y->r spline EXTRAPOLATION,
+    capable of spurious caustic-like spikes). The boundary is exposed as
+    the ``yTop`` attribute after main(). NB the deep end is NOT
+    symmetric: positions below the mapped range have no unique physical
+    answer (deeper atmosphere? surface?) and are left to the map —
+    extend your table until the flux is negligible at its bottom, and
+    well above the flux-recovery altitude at its top (a truncated top
+    still leaves a ~1e-3 spline edge artifact within ~2 scale heights
+    below yTop; the clamp does not cure that).'''
     
     def __init__(self, refractivityProfile, radialDistance, planetDistance, 
                  position, snrPerScaleHeight=0, scaleHeight=None,
@@ -531,7 +544,8 @@ class ChamberlainElliot1997Model:
         self.unfocusedFlux = None
         self.focusedFlux = None
         self.fluxWithNoiseAdded = None
-        
+        self.yTop = None #top of the mapped atmosphere, r_top + D*theta(r_top); set by main()
+
         self.splineResolution = 1.5 #resolution for the grid to make the spline that convert y to r
         self.integrationBin = 1.5
     
@@ -646,8 +660,20 @@ class ChamberlainElliot1997Model:
             self.theta = np.array(theta)
             self.dtheta = np.array(dtheta)
             self.unfocusedFlux = np.array(unfocusedFlux)
-            self.focusedFlux = np.array(focusedFlux) 
-  
+            self.focusedFlux = np.array(focusedFlux)
+
+            #The above-atmosphere vacuum clamp (v0.11.0): positions beyond
+            #yTop passed above the tabulated atmosphere -> vacuum, flux = 1
+            #exactly, no bending. See class docstring (the deep end is
+            #deliberately NOT clamped).
+            t_top = np.trapezoid(self.integrandTheta(x0, self.radialDistance[-1]), x0)*2
+            self.yTop = float(self.radialDistance[-1] + self.planetDistance*t_top)
+            above = np.asarray(self.position, dtype=float) > self.yTop
+            self.theta[above] = 0.0
+            self.dtheta[above] = 0.0
+            self.unfocusedFlux[above] = 1.0
+            self.focusedFlux[above] = 1.0
+
         else:
             #in case that the pre-calculated light curve is given as an input
             self.focusedFlux = self.lightCurve['Flux']
