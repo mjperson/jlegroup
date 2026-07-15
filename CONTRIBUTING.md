@@ -68,7 +68,8 @@ fine if documented in the commit message.
 
 ## Provenance and license
 
-The intended license is MIT, pending permissions from the original lineage authors
-(Wata → W. Saunders → M. Person). State clearly in your delivery whether your code is
-newly written or ports existing code (Mathematica jleGroup, Wata's or Will Saunders'
-Python, published equations), so the copyright line and permissions stay accurate.
+The license is MIT, with permissions granted by all lineage authors
+(W. Tubthong → W. Saunders → M. Person; complete 2026-07-11). Still state clearly in
+your delivery whether your code is newly written or ports existing code (Mathematica
+jleGroup, Tubthong's or Saunders' Python, published equations), so the copyright line
+and the provenance record stay accurate.
