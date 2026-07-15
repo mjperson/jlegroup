@@ -258,6 +258,13 @@ class Body:
 
 #: Minimal registry for the group's occultation science; extend as needed.
 BODIES = {
+    "Earth": Body(
+        "Earth", None, None, None, None, 6378.14, None,
+        "radius: IAU (1976) System of Astronomical Constants equatorial "
+        "radius, 6378.140 km — the value hardcoded in Mathematica jleGroup "
+        "shadowMap 4.1.4 smDist; added for the shadowmap module. Other "
+        "fields not ported (no package-sourced values in hand).",
+    ),
     "Pluto": Body(
         "Pluto", 1.305e22, 0.0065e22, 8.70773e11, 0.043e11, None, None,
         "mass: pdMass['Pluto',1] = Buie et al. 2006, AJ 132, 290; "
