@@ -1,0 +1,87 @@
+# Publish jlegroup to PyPI via trusted publishing (OIDC — no API tokens, no secrets).
+#
+# Trigger: pushing a version tag (v1.0.0, v1.1.0, ...). Dormant until then; the
+# already-pushed v0.x tags do not fire it retroactively.
+#
+# ONE-TIME SETUP (maintainer, on pypi.org — Claude cannot do this):
+#   PyPI -> Your account -> Publishing -> "Add a new pending publisher":
+#     PyPI project name : jlegroup
+#     Owner             : mjperson
+#     Repository name   : jlegroup
+#     Workflow name     : publish.yml
+#     Environment name  : pypi
+#   (The "pypi" GitHub environment is created automatically on first run; optionally
+#   add required reviewers to it under Settings -> Environments for a manual gate.)
+#
+# Release day: bump the version (pyproject/__init__/CITATION), stamp the CHANGELOG,
+# commit, tag vX.Y.Z, push the tag. This workflow builds, verifies, and publishes.
+
+name: publish
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          twine check dist/*
+
+      - name: Guard - tag matches package version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION=$(python - <<'EOF'
+          from email.parser import Parser
+          import glob, zipfile
+          whl = glob.glob("dist/*.whl")[0]
+          with zipfile.ZipFile(whl) as z:
+              meta = next(n for n in z.namelist() if n.endswith("METADATA"))
+              print(Parser().parsestr(z.read(meta).decode())["Version"])
+          EOF
+          )
+          echo "tag: $TAG_VERSION  package: $PKG_VERSION"
+          test "$TAG_VERSION" = "$PKG_VERSION" || {
+            echo "::error::tag v$TAG_VERSION does not match built package version $PKG_VERSION"; exit 1; }
+
+      - name: Verify - run the test suite against the built wheel
+        # Deliberately NOT an editable/source install: pytest imports the wheel
+        # (src/ layout keeps the checkout unimportable), so this exercises the
+        # exact artifact being published, test data from the checkout.
+        run: |
+          python -m pip install dist/*.whl astropy pytest
+          python -c "import jlegroup; print('wheel imports as', jlegroup.__version__)"
+          python -m pytest -q
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/jlegroup
+    permissions:
+      id-token: write   # OIDC token for trusted publishing — the only permission needed
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
