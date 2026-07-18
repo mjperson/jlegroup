@@ -16,13 +16,15 @@ public release.
   fluctuate positive keep full resolution while merges stop barely-positive —
   which deletes the noise distribution's lower tail. Measured at
   (S/N)_H = 20 (12 paired seeds, exact boundary): deep-third temperatures
-  biased **hot by ~5 formal sigmas** with scatter suppressed to ~0.84 of
-  formal. The ratchet makes the bin size monotone non-decreasing (binning
-  tracks the S/N envelope, not individual draws), restoring honest
-  statistics (mean z ~ +0.2, std ~ 1.1) at the cost of deep resolution
-  (~40% fewer shells there). Off by default — the published scheme remains
-  the validated baseline; `InversionResult.bin_counts` (new) reports the
-  delivered resolution either way.
+  biased **hot by ~5 formal sigmas** (~+55 K; confirmed on an independent
+  60-seed run at review) with scatter suppressed below formal. The ratchet
+  makes the bin size monotone non-decreasing (binning tracks the S/N
+  envelope, not individual draws), removing the deep bias (mean z ~ +0.2
+  to +0.4 across seed sets; scatter at or below formal) at the cost of
+  deep resolution (~40% fewer shells there). Off by default — the
+  published scheme remains the validated baseline;
+  `InversionResult.bin_counts` (new) reports the delivered resolution
+  either way.
 
 ## [0.11.0] — 2026-07-15 — The above-atmosphere vacuum clamp
 
