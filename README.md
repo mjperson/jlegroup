@@ -161,6 +161,18 @@ sensitivity the paper's error analysis predicts.
   misprint is corrected, and boundary conditions with λ_h ≲ 6 are rejected (the
   half-light relation has no real solution there). On noisy data choose the inversion
   boundary `i_b` explicitly (Sec. 7.3).
+- **On low-S/N inversions, prefer `ratchet_binning=True` — the default (off) silently
+  biases the deep profile hot.** EPQ03's published positivity averaging lets the *noise
+  realization* set the deep binning, which structurally deletes the lower tail of the noise
+  distribution: deep temperatures come out biased **hot by several formal sigmas** (≈ +5σ,
+  tens of K, at (S/N)_H = 20) with scatter *tighter* than the propagated errors — spurious
+  stability, the hot deep bend of the paper's own Fig. 9. `ratchet_binning=True` makes the
+  positivity bin size a monotone ratchet that tracks the S/N envelope instead, restoring
+  honest deep statistics at the cost of resolution at the lowest flux levels
+  (`InversionResult.bin_counts` reports the delivered resolution). It is **off by default on
+  purpose** — the published scheme is the validated baseline and an exact no-op on clean
+  (all-positive) data — but for real low-S/N retrievals you generally want it on
+  (concept: W. Saunders).
 
 ## Lineage & citation
 
