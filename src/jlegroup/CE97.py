@@ -1,14 +1,18 @@
     # -*- coding: utf-8 -*-
 """
 Created on Sun Sep 9 2021
-Last edited on 13 Oct 2021 by William Saunders
+Edited on 13 Oct 2021 by William Saunders
+Edited June/July 2026 by Michael J Person
 
-@author: WataThep
+@author: Wata Tubthong
 
 Changes by William Saunders:
 - Added inputs from T-r profiles and T-p profiles 
 - Return theta and dtheta in the light curves class
 - Allow mean molecular mass to be a vector --> make a function
+Changes by Michael Person:
+- Added top of atmosphere clamp to stabilize higher altitudes.
+- Regularized constants and constant handling.
 """
 
 import numpy as np

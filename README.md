@@ -2,7 +2,7 @@
 
 Python implementations of the MIT Elliot-group stellar-occultation light-curve methods.
 
-*Named for James Ludlow Elliot (1943–2011) — author of the methods implemented here,
+*Named for James Ludlow Elliot (1943–2011) — an author of the methods implemented here,
 and mentor to this package's maintainer.*
 
 | Module | Method | Status |
@@ -176,14 +176,11 @@ sensitivity the paper's error analysis predicts.
 
 ## Lineage & citation
 
-Original Python implementation by **Wata (Chanita) Tubthong**
+Original Python implementation of CE97 by **Wata (Chanita) Tubthong**
 ([ORCID 0000-0002-7907-2634](https://orcid.org/0000-0002-7907-2634), 2021), extended by
 **William Saunders** ([ORCID 0000-0002-8737-742X](https://orcid.org/0000-0002-8737-742X),
-2021), packaged, validated, and maintained by **Michael J. Person**
-([ORCID 0000-0003-0000-0572](https://orcid.org/0000-0003-0000-0572), 2026). The method
-is **Chamberlain & Elliot (1997)**, PASP 109, 1170 — please cite that paper (and this
-package; see `CITATION.cff`) in work that uses it. Development history and the full
-validation campaign live in the maintainer's research repository.
+2021), edited, packaged, validated, and maintained by **Michael J. Person**
+([ORCID 0000-0003-0000-0572](https://orcid.org/0000-0003-0000-0572), 2026). Development history and the full validation campaign live in the maintainer's research repository.
 
 ## License
 

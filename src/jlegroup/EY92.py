@@ -19,7 +19,7 @@ jleGroup occLightCurves default (olcEYorderForOneOverLambda = 1).
 Provenance
 ----------
 Newly written from the published equations (not ported from the
-Mathematica jleGroup, Wata's, or W. Saunders' code).  Developed and
+Mathematica jleGroup).  Developed and
 validated standalone against the EY92 paper benchmark (Tables 2, 3a,
 3b: print-precision agreement at all series orders), then integrated
 here; see tests/test_EY92.py and tests/data/ey92-paper/.
