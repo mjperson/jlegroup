@@ -19,7 +19,7 @@ maintainers = [
     { name = "Michael J. Person", email = "mjperson@mit.edu" },
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Programming Language :: Python :: 3",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Astronomy",

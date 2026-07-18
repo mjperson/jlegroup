@@ -16,11 +16,12 @@ deliver code as a branch here, not as loose files.
    pip install -e ".[test]"
    pytest -v
    ```
-3. Push the branch (`git push -u origin <topic>`). CI runs pytest on every push, on
-   every branch — a red X on your branch means it is not ready to merge.
+3. Push the branch (`git push -u origin <topic>`; without push access, fork on GitHub
+   and open a pull request — same workflow, same expectations). CI runs pytest on
+   every push, on every branch — a red X on your branch means it is not ready to merge.
 4. Report back to the maintainer: branch name, what you validated against and the
    residuals achieved, any new dependencies, and the provenance of any ported code.
-5. Review and merge happen on the maintainer's side. **The repo stays private.**
+5. Review and merge happen on the maintainer's side.
 
 Do not modify the validated modules (`CE97.py`, `ray_crossing.py`) or existing tests on
 a feature branch. Additive changes to `physicalData.py` (new gases, new constants) are
