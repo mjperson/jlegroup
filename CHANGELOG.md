@@ -4,8 +4,24 @@ All notable changes to `jlegroup`. Versions are tagged in git; entries list the
 tagged commit. (Tags v0.1.0–v0.9.0 were created retroactively on 2026-07-14 from
 the recorded version-bump commits; from v0.9.0 onward, tagging happens at release.)
 
-Version scheme: `0.N.0` during development; `1.0.0` is reserved for the first
+Version scheme: `0.N.0` during development; `1.0.0` (2026-07-18) is the first
 public release.
+
+## [1.0.0] — 2026-07-18 — First public release
+
+- The repository is **public** and the package is on **PyPI**: `pip install
+  jlegroup` (shadow maps via the `[shadowmap]` extra). Published by the
+  trusted-publishing workflow added in v0.12.x (`.github/workflows/publish.yml`):
+  OIDC, no tokens; every release is built, `twine check`ed, guarded
+  (tag == package version), and has the full test suite run against the built
+  wheel before upload.
+- Public-era text: README Status/Install rewritten for the public repo,
+  CONTRIBUTING gains the fork-and-PR path, and the Development Status
+  classifier moves Beta → Production/Stable.
+- No code changes since v0.12.0: 223 tests, five CI legs, all green. The
+  API as documented — CE97, EY92 (+ traditional parameterizations), EPQ03
+  (+ ratchet binning), physicalData (two constants vintages), shadowmap
+  (optional extra) — is the 1.0 API.
 
 ## [0.12.0] — 2026-07-18 — Ratchet Binning (Saunders)
 
