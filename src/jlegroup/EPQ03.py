@@ -330,7 +330,7 @@ def bin_uniform(y, flux, sigma, n_per_bin):
     )
 
 
-def average_until_positive(y, flux, sigma):
+def average_until_positive(y, flux, sigma, ratchet=False, return_counts=False):
     """Merge each non-positive flux with the following point(s) until the
     average is positive  [paragraph after Eq. 32].
 
@@ -339,30 +339,64 @@ def average_until_positive(y, flux, sigma):
     midpoint of its first and last members.  A trailing group that never
     turns positive is dropped (a non-positive shell flux has no valid
     radius and cannot be inverted).
+
+    ratchet : bool
+        Ratchet binning (concept: W. Saunders, from extensive use of the
+        EPQ03 methodology in his PhD thesis work).  The published scheme
+        lets the noise realization itself set the binning: a deep point
+        that happens to fluctuate positive is kept at full resolution (a
+        truncated, positively-biased selection), while a merge stops the
+        moment its running mean crosses zero (clipped barely-positive).
+        The lower tail of the noise distribution is thereby structurally
+        deleted, and the deep profile comes out smoother than the
+        propagated errors allow — spurious stability.  With
+        ``ratchet=True`` the bin size is a monotone non-decreasing
+        ratchet: once positivity has forced a merge of k points, every
+        subsequent bin starts at k points (raised further only when
+        positivity again forces it), so the binning tracks the S/N
+        envelope rather than individual noise draws.  Honest deep-
+        profile statistics are restored at the cost of resolution at the
+        lowest flux levels.
+
+        Definitional choices (this implementation): the ratchet level is
+        counted in input points; it equals the largest realized bin size
+        so far; a bin at the current level is extended only if its mean
+        is non-positive; a trailing group with fewer than ``level``
+        points is dropped (strict resolution guarantee), as is a
+        trailing non-positive group.
+    return_counts : bool
+        Also return the number of input points in each output bin.
     """
     y = _check_descending(y)
     flux = np.asarray(flux, dtype=float)
     sigma = np.asarray(sigma, dtype=float)
 
-    out_y, out_flux, out_sigma = [], [], []
+    out_y, out_flux, out_sigma, out_count = [], [], [], []
+    level = 1
     i = 0
     n = y.size
     while i < n:
-        j = i + 1
-        total = flux[i]
-        var = sigma[i] ** 2
+        j = min(i + level, n) if ratchet else i + 1
+        total = flux[i:j].sum()
+        var = (sigma[i:j] ** 2).sum()
         while total <= 0.0 and j < n:
             total += flux[j]
             var += sigma[j] ** 2
             j += 1
-        if total <= 0.0:
-            break  # trailing non-positive group: drop
         k = j - i
+        if total <= 0.0 or (ratchet and k < level):
+            break  # trailing group: non-positive, or thinner than the ratchet
+        if ratchet:
+            level = max(level, k)
         out_y.append(0.5 * (y[i] + y[j - 1]))
         out_flux.append(total / k)
         out_sigma.append(np.sqrt(var) / k)
+        out_count.append(k)
         i = j
-    return np.asarray(out_y), np.asarray(out_flux), np.asarray(out_sigma)
+    result = (np.asarray(out_y), np.asarray(out_flux), np.asarray(out_sigma))
+    if return_counts:
+        return result + (np.asarray(out_count, dtype=int),)
+    return result
 
 
 def boundary_index(flux, level):
@@ -1278,6 +1312,9 @@ class InversionResult:
     gas: object                   # constants.Gas
     m_p: float                    # body mass, kg
     constants: object             # constants.ConstantSet
+    bin_counts: np.ndarray        # input points per averaged bin (aligned
+                                  # with y/flux/sigma) — the delivered
+                                  # resolution, incl. any ratchet binning
 
     @property
     def temperature(self):
@@ -1299,6 +1336,7 @@ def invert_light_curve(
     i_b=None,
     n_per_bin=1,
     min_shell=1.0,
+    ratchet_binning=False,
     order=2,
     variant="corrected",
     nu_h_method="ey92-4.28",
@@ -1321,6 +1359,13 @@ def invert_light_curve(
         the positivity averaging  [Sec. 5].
     min_shell : minimum atmospheric shell thickness, km  [Sec. 3.2];
         None or 0 skips shell binning.
+    ratchet_binning : make the positivity-averaging bin size a monotone
+        ratchet (concept: W. Saunders) — see ``average_until_positive``.
+        Off by default: the published EPQ03 scheme is the validated
+        baseline; turn on for honest deep-profile statistics on noisy
+        curves, at the cost of resolution at the lowest flux levels.
+        The delivered resolution is reported in the result's
+        ``bin_counts``.
     order, variant, nu_h_method : EY92 series controls for a fitted
         boundary (ignored when ``boundary`` is supplied).
     """
@@ -1332,7 +1377,9 @@ def invert_light_curve(
 
     if n_per_bin > 1:
         y, flux, sigma = bin_uniform(y, flux, sigma, n_per_bin)
-    y, flux, sigma = average_until_positive(y, flux, sigma)
+    y, flux, sigma, bin_counts = average_until_positive(
+        y, flux, sigma, ratchet=ratchet_binning, return_counts=True
+    )
 
     if i_b is None:
         i_b = boundary_index(flux, boundary_flux)
@@ -1366,7 +1413,7 @@ def invert_light_curve(
     return InversionResult(
         profiles=profiles, grid=grid, grid_full=grid_full, fit=fit_result,
         boundary=boundary, i_b=int(i_b), y=y, flux=flux, sigma=sigma,
-        gas=gas, m_p=m_p, constants=constants,
+        gas=gas, m_p=m_p, constants=constants, bin_counts=bin_counts,
     )
 
 

@@ -953,3 +953,145 @@ def test_write_csv_round_trip(tmp_path):
     col = names.index("pressure_microbar")
     np.testing.assert_allclose(data[:, col], res.profiles.pressure * 10.0,
                                rtol=1e-12)
+
+
+#############################################################################
+# ratchet binning (concept: W. Saunders)
+#############################################################################
+# The published positivity averaging lets the noise realization set the
+# binning, which biases the deep profile hot and suppresses its scatter;
+# the ratchet makes the bin size monotone non-decreasing so binning tracks
+# the S/N envelope.  The statistical acceptance values below are measured
+# (15 paired seeds, this implementation) with headroom.
+
+
+def test_ratchet_no_op_on_all_positive_data():
+    """With no non-positive fluxes the ratchet never engages: output is
+    identical to the published scheme (and to the input)."""
+    y = np.array([10.0, 9.0, 8.0, 7.0, 6.0])
+    flux = np.array([0.9, 0.7, 0.5, 0.3, 0.1])
+    sigma = np.full(5, 0.05)
+    plain = average_until_positive(y, flux, sigma)
+    ratch = average_until_positive(y, flux, sigma, ratchet=True,
+                                   return_counts=True)
+    for a, b in zip(plain, ratch[:3]):
+        np.testing.assert_array_equal(a, b)
+    np.testing.assert_array_equal(ratch[3], np.ones(5, dtype=int))
+
+
+def test_ratchet_monotone_levels_and_conservation():
+    """Once positivity forces a k-point merge, every later bin has >= k
+    points; the published scheme instead resets to single points.  Flux
+    sums over consumed points are conserved in both."""
+    y = np.arange(20.0, 0.0, -1.0)
+    flux = np.array([0.5, 0.4, -0.2, 0.5, 0.3, 0.2, 0.1, 0.2, -0.3, 0.5,
+                     0.2, 0.1, 0.3, -0.1, 0.2, 0.1, 0.2, 0.1, -0.2, 0.4])
+    sigma = np.full(20, 0.1)
+
+    yb, fb, sb, kb = average_until_positive(y, flux, sigma, ratchet=True,
+                                            return_counts=True)
+    assert np.all(np.diff(kb) >= 0)          # the ratchet never loosens
+    assert kb[0] == 1 and kb.max() >= 2      # engages at the first negative
+    consumed = kb.sum()
+    assert np.isclose((fb * kb).sum(), flux[:consumed].sum())
+
+    yp, fp, sp, kp = average_until_positive(y, flux, sigma, return_counts=True)
+    assert np.any(np.diff(kp) < 0)           # published scheme un-bins again
+    assert np.isclose((fp * kp).sum(), flux[:kp.sum()].sum())
+    assert np.all(fb > 0) and np.all(fp > 0)
+
+
+def test_ratchet_trailing_underfull_group_dropped():
+    """A trailing group thinner than the current level is dropped even if
+    positive (strict resolution guarantee); the published scheme keeps it."""
+    y = np.arange(8.0, 0.0, -1.0)
+    flux = np.array([0.5, -0.4, 0.2, 0.3, 0.1, 0.2, 0.4, 0.4])
+    sigma = np.full(8, 0.1)
+    # ratchet: [0](1pt) then [-0.4,0.2,0.3](3pts, level->3), then [0.1,0.2,0.4]
+    # (3pts), leaving one positive point 0.4 < level -> dropped
+    yb, fb, sb, kb = average_until_positive(y, flux, sigma, ratchet=True,
+                                            return_counts=True)
+    np.testing.assert_array_equal(kb, [1, 3, 3])
+    assert kb.sum() == 7                     # the 8th point was dropped
+    yp, fp, sp, kp = average_until_positive(y, flux, sigma, return_counts=True)
+    assert kp.sum() == 8                     # published scheme keeps it
+
+
+def test_ratchet_pipeline_switch_and_bin_counts():
+    """invert_light_curve(ratchet_binning=True) reports monotone bin counts;
+    the default reproduces the published scheme (counts reset to 1)."""
+    y, phi = generate_light_curve(ATM, 1600.0, 440.0)
+    i_b = boundary_index(phi, 0.5)
+    sigma = sigma_from_snr_h(100.0, ATM.h_h, 0.5)
+    noisy, sig = add_noise(phi, sigma, np.random.default_rng(4))
+    kw = dict(d=ATM.d, gas=ATM.gas, m_p=ATM.mass(CODATA1986),
+              constants=CODATA1986, boundary=standard_true_boundary(),
+              order=ATM.order, i_b=i_b)
+    res_r = invert_light_curve(y, noisy, sig, ratchet_binning=True, **kw)
+    res_p = invert_light_curve(y, noisy, sig, **kw)
+    assert res_r.bin_counts.max() > 1
+    assert np.all(np.diff(res_r.bin_counts) >= 0)
+    after_first = np.argmax(res_p.bin_counts > 1)
+    assert np.any(res_p.bin_counts[after_first:] == 1)  # published un-bins
+    # noiseless: both are the identity, counts all one
+    res_0 = invert_light_curve(y, phi, ratchet_binning=True, **kw)
+    assert np.all(res_0.bin_counts == 1)
+    np.testing.assert_allclose(
+        res_0.temperature.mean(), 79.997, atol=2e-3
+    )
+
+
+def _ratchet_mc_arm(ratchet, seeds=range(12), snr_h=20.0):
+    """Deep-profile z = (T - 80)/sigma_T statistics with an exactly-known
+    boundary (isolates the flux-summation term).  i_b is chosen by shadow
+    radius on the averaged arrays (a flux-level trigger is meaningless at
+    this noise level)."""
+    y_b_ref = 1168.75  # the noiseless standard-case boundary shell edge
+    bc = standard_true_boundary()
+    y, phi = generate_light_curve(ATM, 1600.0, 440.0)
+    sigma = sigma_from_snr_h(snr_h, ATM.h_h, 0.5)
+    deep, shells = [], []
+    for seed in seeds:
+        noisy, sig = add_noise(phi, sigma, np.random.default_rng(seed))
+        ya, fa, sa = average_until_positive(y, noisy, sig, ratchet=ratchet)
+        i_b = int(np.argmax(ya <= y_b_ref))
+        res = invert_light_curve(
+            ya, fa, sa, d=ATM.d, gas=ATM.gas, m_p=ATM.mass(CODATA1986),
+            constants=CODATA1986, boundary=bc, order=ATM.order, i_b=i_b,
+        )
+        budget = propagate_errors(res)
+        z = (res.temperature - 80.0) / budget.temperature.total
+        deep.append(z[2 * z.size // 3:])
+        shells.append(z.size)
+    return np.concatenate(deep), np.array(shells)
+
+
+def test_ratchet_restores_honest_deep_statistics():
+    """The feature's claim, measured at (S/N)_H = 20 with paired noise
+    seeds.  Published scheme: deep temperatures biased hot by several
+    formal sigmas (measured mean z ~ +5, ~ +55 K; cross-checked on an
+    independent 60-seed run at review) with suppressed scatter — the
+    spurious stability ratchet binning was invented for.  Ratchet:
+    mean z near zero — at the price of deep resolution.
+
+    The honesty claim is carried by the *mean* z and its contrast with
+    the published arm.  std(z) gets no lower bound: deep z's within one
+    curve are strongly correlated (the flux-summation errors share the
+    cumulative sums), so each sample contributes only a few effective
+    degrees of freedom and 12-seed std estimates swing ~0.7-1.2 across
+    seed windows; a value below 1 merely means the propagated errors
+    are not underestimates, which is benign for an unbiased profile."""
+    z_pub, shells_pub = _ratchet_mc_arm(ratchet=False)
+    z_rat, shells_rat = _ratchet_mc_arm(ratchet=True)
+
+    # the artifact, documented: hot bias and under-dispersion
+    assert 3.0 < z_pub.mean() < 8.0
+    assert z_pub.std() < 0.95
+    # the fix: deep bias removed at the sub-sigma level, in absolute
+    # terms and relative to the published arm's bias
+    assert abs(z_rat.mean()) < 1.2
+    assert z_rat.mean() < 0.25 * z_pub.mean()
+    # and the formal errors are not underestimates (no floor: see above)
+    assert z_rat.std() < 1.5
+    # the price: coarser deep resolution
+    assert shells_rat.mean() < 0.8 * shells_pub.mean()
