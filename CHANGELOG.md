@@ -7,7 +7,7 @@ the recorded version-bump commits; from v0.9.0 onward, tagging happens at releas
 Version scheme: `0.N.0` during development; `1.0.0` is reserved for the first
 public release.
 
-## [Unreleased]
+## [0.12.0] — 2026-07-18 — Ratchet Binning (Saunders)
 
 - **EPQ03 ratchet binning** (concept: W. Saunders, from his PhD-thesis work
   with the methodology): `invert_light_curve(..., ratchet_binning=True)` /
