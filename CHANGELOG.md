@@ -9,6 +9,21 @@ public release.
 
 ## [Unreleased]
 
+- **EPQ03 ratchet binning** (concept: W. Saunders, from his PhD-thesis work
+  with the methodology): `invert_light_curve(..., ratchet_binning=True)` /
+  `average_until_positive(..., ratchet=True)`. The published positivity
+  averaging lets the noise realization set the deep binning — points that
+  fluctuate positive keep full resolution while merges stop barely-positive —
+  which deletes the noise distribution's lower tail. Measured at
+  (S/N)_H = 20 (12 paired seeds, exact boundary): deep-third temperatures
+  biased **hot by ~5 formal sigmas** with scatter suppressed to ~0.84 of
+  formal. The ratchet makes the bin size monotone non-decreasing (binning
+  tracks the S/N envelope, not individual draws), restoring honest
+  statistics (mean z ~ +0.2, std ~ 1.1) at the cost of deep resolution
+  (~40% fewer shells there). Off by default — the published scheme remains
+  the validated baseline; `InversionResult.bin_counts` (new) reports the
+  delivered resolution either way.
+
 ## [0.11.0] — 2026-07-15 — The above-atmosphere vacuum clamp
 
 - `CE97.ChamberlainElliot1997Model` now clamps positions beyond
