@@ -71,7 +71,7 @@ bundled reference light curve.
 | [`00_jlegroup_overview.ipynb`](examples/00_jlegroup_overview.ipynb) | the package in one exercise: EY92 ↔ CE97 forward cross-check, then the EPQ03 inversion round trip |
 | [`01_EY92_basics.ipynb`](examples/01_EY92_basics.ipynb) | analytic model: parameters, series order & misprint corrections, haze, two-limb central flash, traditional fitting parameterizations |
 | [`02_CE97_basics.ipynb`](examples/02_CE97_basics.ipynb) | numerical model: atmosphere builders, time-domain curves + noise, validation vs bundled references, the above-atmosphere vacuum clamp |
-| [`03_EPQ03_basics.ipynb`](examples/03_EPQ03_basics.ipynb) | inversion: noiseless round trip, noisy retrieval, the EPQ03 error budget, thermal gradients |
+| [`03_EPQ03_basics.ipynb`](examples/03_EPQ03_basics.ipynb) | inversion: noiseless round trip, noisy retrieval, the EPQ03 error budget, thermal gradients, ratchet binning |
 | [`04_shadowmap_basics.ipynb`](examples/04_shadowmap_basics.ipynb) | shadow maps on the 2015-06-29 Pluto event: globe / mercator / equirectangular views, night shading, track bands + ground paths, `smDist`/`smOffset` (needs the `shadowmap` extra) |
 
 ## Validation
