@@ -18,26 +18,24 @@ and mentor to this package's maintainer.*
 
 ## Status
 
-**Private, in development.** License is MIT, with permissions granted by **all** authors
-in the code lineage (W. Tubthong → W. Saunders → M. Person):
-**Wata (Chanita) Tubthong — granted, unrestricted (2026-07-10)**;
-**William Saunders — granted, full (2026-07-11)**.
-Public release / PyPI publication is now purely a maintainer decision;
-until it happens, do not redistribute.
+**Public, MIT-licensed** — with permissions granted by all authors in the code lineage
+(W. Tubthong → W. Saunders → M. Person). v1.0.0 is the first public release; actively
+maintained. Bug reports and contributions are welcome — see `CONTRIBUTING.md`.
 
 ## Install
 
 ```sh
-# from GitHub (works for collaborators on the private repo, via gh/ssh auth)
-pip install git+https://github.com/mjperson/jlegroup.git
-
-# or, for development, from a checkout:
-pip install -e ".[test]"
+pip install jlegroup
 
 # shadow maps are an optional extra (adds astropy; the light-curve
 # modules work without it):
-pip install "jlegroup[shadowmap] @ git+https://github.com/mjperson/jlegroup.git"
-pip install -e ".[test,shadowmap]"        # development equivalent
+pip install "jlegroup[shadowmap]"
+
+# latest development version, from GitHub:
+pip install git+https://github.com/mjperson/jlegroup.git
+
+# or, for development, from a checkout:
+pip install -e ".[test,shadowmap]"
 ```
 
 Requires Python ≥ 3.10 and numpy ≥ 2.0.
