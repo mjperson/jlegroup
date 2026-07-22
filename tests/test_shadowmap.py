@@ -756,6 +756,90 @@ def test_globe_with_sites_and_texts(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Zoom windows
+# ---------------------------------------------------------------------------
+
+
+def test_map_window_identity_at_view_center():
+    # View (0, 0) on equirectangular: lat'/lon' = lat/lon, so the box is
+    # just the (padded) window in radians.
+    xmin, xmax, ymin, ymax = sm.map_window(-10.0, 10.0, -20.0, 30.0,
+                                           0.0, 0.0, "equirectangular",
+                                           pad=0.0)
+    assert xmin == pytest.approx(math.radians(-20.0), abs=1e-9)
+    assert xmax == pytest.approx(math.radians(30.0), abs=1e-9)
+    assert ymin == pytest.approx(math.radians(-10.0), abs=1e-9)
+    assert ymax == pytest.approx(math.radians(10.0), abs=1e-9)
+
+
+def test_map_window_dateline_crossing():
+    # lon 150 -> -160 crosses the 180 meridian: 50 deg wide, not 310.
+    xmin, xmax, _, _ = sm.map_window(-10.0, 10.0, 150.0, -160.0,
+                                     0.0, 180.0, "equirectangular", pad=0.0)
+    assert (xmax - xmin) == pytest.approx(math.radians(50.0), abs=1e-6)
+
+
+def test_map_window_pole_handling():
+    # View (0,0): the north view pole is the geographic north pole.  A
+    # window that actually contains it is unbounded on mercator and
+    # clamped to the map edge on equirectangular; one stopping short
+    # (89.5) is legal on mercator — just tall.
+    with pytest.raises(ValueError, match="pole"):
+        sm.map_window(80.0, 90.0, -180.0, 180.0 - 1e-9, 0.0, 0.0, "mercator")
+    box = sm.map_window(80.0, 89.5, -180.0, 180.0 - 1e-9, 0.0, 0.0,
+                        "mercator", pad=0.0)
+    assert math.isfinite(box[3])
+    _, _, _, ymax = sm.map_window(80.0, 90.0, -180.0, 180.0 - 1e-9,
+                                  0.0, 0.0, "equirectangular", pad=0.0)
+    assert ymax == pytest.approx(math.pi / 2.0, abs=1e-9)
+
+
+def test_map_window_orthographic_visibility():
+    # A window on the near side boxes fine; the antipodal window errors.
+    box = sm.map_window(30.0, 55.0, -100.0, -60.0, 42.36, -71.09,
+                        "orthographic")
+    assert -1.0 <= box[0] < box[1] <= 1.0
+    assert -1.0 <= box[2] < box[3] <= 1.0
+    with pytest.raises(ValueError, match="hidden"):
+        sm.map_window(-55.0, -30.0, 80.0, 120.0, 42.36, -71.09,
+                      "orthographic")
+
+
+def test_map_window_validation():
+    with pytest.raises(ValueError, match="lat_min"):
+        sm.map_window(10.0, -10.0, 0.0, 20.0, 0.0, 0.0)
+    with pytest.raises(ValueError, match="longitude span"):
+        sm.map_window(-10.0, 10.0, 30.0, 30.0, 0.0, 0.0)
+
+
+def test_globe_zoom(tmp_path):
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    na = (12.0, 62.0, -130.0, -55.0)
+    for proj in sm.PROJECTIONS:
+        ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                      projection=proj, tracks=True, dist=0.2, pa=20.0,
+                      radius=0.2, zoom_latlon=na)
+        want = sm.map_window(*na, 42.3601, -71.0942, proj)
+        assert ax.get_xlim() == pytest.approx((want[0], want[1]), rel=1e-3)
+        assert ax.get_ylim() == pytest.approx((want[2], want[3]), rel=1e-3)
+        plt.close(ax.figure)
+
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                  tracks=True, dist=0.2, pa=20.0, radius=0.2,
+                  zoom_xy=(-0.6, 0.7, -0.5, 0.8))
+    assert ax.get_xlim() == (-0.6, 0.7)
+    assert ax.get_ylim() == (-0.5, 0.8)
+    plt.close(ax.figure)
+
+    with pytest.raises(ValueError, match="not both"):
+        sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                 zoom_latlon=na, zoom_xy=(-1, 1, -1, 1))
+
+
+# ---------------------------------------------------------------------------
 # The full map
 # ---------------------------------------------------------------------------
 

@@ -120,6 +120,7 @@ __all__ = [
     "Site",
     "MapText",
     "map_coordinates",
+    "map_window",
     "plot_sites",
     "plot_texts",
     "star_coord",
@@ -517,6 +518,86 @@ def map_coordinates(lat_deg, lon_deg, view_lat_deg, view_lon_deg,
     if scalar:
         return float(xy[0, 0]), float(xy[0, 1]), bool(visible[0])
     return xy[:, 0], xy[:, 1], visible
+
+
+def map_window(lat_min, lat_max, lon_min, lon_max, view_lat_deg, view_lon_deg,
+               projection="orthographic", pad=0.03, n=73):
+    """Map-coordinate bounding box (xmin, xmax, ymin, ymax) of a
+    geographic lat/lon window — the zoom engine.
+
+    The window's image is curved in map coordinates, so its boundary is
+    sampled (``n`` points per edge) and the box padded by ``pad`` (a
+    fraction of each span).  ``lon_min > lon_max`` means the window
+    crosses the ±180 meridian.  A window containing a view-frame pole is
+    rejected on the mercator map (unbounded ordinate) and clamped to the
+    map edge on the equirectangular; on the orthographic map, window
+    parts on the far hemisphere are ignored (entirely-hidden windows
+    are an error).
+
+    Limitation: on cylindrical maps a window straddling the view-frame
+    ±180 deg meridian (the anti-sub-star meridian, far from any track)
+    is boxed correctly but map content is only drawn on the principal
+    side of the seam.
+    """
+    _check_projection(projection)
+    if lat_min >= lat_max:
+        raise ValueError("map_window requires lat_min < lat_max")
+    lon_span = (lon_max - lon_min) % 360.0
+    if lon_span == 0.0:
+        raise ValueError("map_window requires a nonzero longitude span")
+
+    lats = np.linspace(lat_min, lat_max, n)
+    lons = lon_min + np.linspace(0.0, lon_span, n)
+    edge_lat = np.concatenate([np.full(n, lat_min), np.full(n, lat_max),
+                               lats, lats])
+    edge_lon = np.concatenate([lons, lons,
+                               np.full(n, lon_min),
+                               np.full(n, lon_min + lon_span)])
+    xs, ys, vis = map_coordinates(edge_lat, edge_lon,
+                                  view_lat_deg, view_lon_deg, projection)
+
+    # a view-frame pole inside the window bounds the window at the map
+    # edge (equirectangular), blows up (mercator), or adds its own
+    # image point (orthographic)
+    clamp_y = []
+    for sign in (1.0, -1.0):
+        plat, plon = view_rotation_inverse(sign * math.pi / 2.0, 0.0,
+                                           view_lat_deg, view_lon_deg)
+        plat, plon = math.degrees(float(plat)), math.degrees(float(plon))
+        inside = (lat_min <= plat <= lat_max
+                  and (plon - lon_min) % 360.0 <= lon_span)
+        if not inside:
+            continue
+        if projection == "mercator":
+            raise ValueError(
+                "zoom window contains a view-frame pole: the mercator "
+                "ordinate is unbounded there — shrink the window or use "
+                "the equirectangular projection")
+        if projection == "equirectangular":
+            clamp_y.append(sign * math.pi / 2.0)
+        else:
+            px, py, pvis = map_coordinates(plat, plon, view_lat_deg,
+                                           view_lon_deg, projection)
+            if pvis:
+                xs = np.append(xs, px)
+                ys = np.append(ys, py)
+                vis = np.append(vis, True)
+
+    xs, ys = xs[vis], ys[vis]
+    if len(xs) == 0:
+        raise ValueError("zoom window is entirely on the hidden hemisphere")
+    if projection != "orthographic":
+        # unwrap x about its circular mean so seam-crossing windows box
+        # tightly instead of spanning the whole map
+        mean = math.atan2(float(np.mean(np.sin(xs))),
+                          float(np.mean(np.cos(xs))))
+        xs = mean + (xs - mean + math.pi) % (2.0 * math.pi) - math.pi
+    xmin, xmax = float(xs.min()), float(xs.max())
+    ymin, ymax = float(ys.min()), float(ys.max())
+    for y in clamp_y:
+        ymin, ymax = min(ymin, y), max(ymax, y)
+    dx, dy = pad * (xmax - xmin), pad * (ymax - ymin)
+    return xmin - dx, xmax + dx, ymin - dy, ymax + dy
 
 
 @dataclass(frozen=True)
@@ -1087,6 +1168,7 @@ def offset_prediction(ra, dec, ra_offset, dec_offset, b_arcsec, pa_deg,
 def globe(star, time, projection="orthographic", horizon_angle=0.0,
           shadow_gray=0.8, tracks=False, dist=0.0, pa=0.0, radius=0.0,
           pred_error=0.0, sites=None, texts=None, auto_labels=True,
+          zoom_latlon=None, zoom_xy=None,
           print_diagnostic=False, ax=None, plot_label=None):
     """Draw the occultation shadow map (the smGlobe product).
 
@@ -1114,6 +1196,15 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
         (see plot_texts).
     auto_labels : run the declutter pass on site labels that do not pin
         a label_offset (see plot_sites); pinned labels are never moved.
+    zoom_latlon : (lat_min, lat_max, lon_min, lon_max) in degrees — zoom
+        the map to a geographic window (any projection; see map_window,
+        including its view-pole and seam caveats).  lon_min > lon_max
+        crosses the ±180 meridian.
+    zoom_xy : (xmin, xmax, ymin, ymax) — zoom to raw map coordinates
+        (orthographic: Earth radii on the disk; cylindrical: view-frame
+        radians / mercator ordinate).  Mutually exclusive with
+        zoom_latlon.  Label decluttering runs after zooming, so
+        placements adapt to the zoomed scale.
     print_diagnostic : print the track diagnostic note (with
         tracks=True), as in the original.
     ax : matplotlib axes to draw into (a new figure is created if None).
@@ -1124,6 +1215,8 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
     import matplotlib.pyplot as plt  # optional at import time, as in EPQ03
 
     _check_projection(projection)
+    if zoom_latlon is not None and zoom_xy is not None:
+        raise ValueError("give zoom_latlon or zoom_xy, not both")
     coord = star_coord(*star) if isinstance(star, tuple) else star_coord(star)
     t = as_time(time)
     view_lat, view_lon = substar_point(coord, t)
@@ -1184,6 +1277,15 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
                             linewidth=0.8, linestyle="--", zorder=4)
             if print_diagnostic and tp.note:
                 print(tp.note)
+    if zoom_latlon is not None:
+        xmin, xmax, ymin, ymax = map_window(*zoom_latlon, view_lat, view_lon,
+                                            projection)
+        ax.set_xlim(xmin, xmax)
+        ax.set_ylim(ymin, ymax)
+    elif zoom_xy is not None:
+        xmin, xmax, ymin, ymax = zoom_xy
+        ax.set_xlim(xmin, xmax)
+        ax.set_ylim(ymin, ymax)
     ax.set_aspect("equal")
     # annotations go last, once limits and aspect are final — the
     # declutter pass measures real screen geometry
