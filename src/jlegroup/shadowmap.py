@@ -1318,9 +1318,9 @@ def offset_prediction(ra, dec, ra_offset, dec_offset, b_arcsec, pa_deg,
 
 def globe(star, time, projection="orthographic", horizon_angle=0.0,
           shadow_gray=0.8, land_color=None, ocean_color=None,
-          night_land_color=None, tracks=False, dist=0.0, pa=0.0, radius=0.0,
-          pred_error=0.0, sites=None, texts=None, auto_labels=True,
-          zoom_latlon=None, zoom_xy=None,
+          night_land_color=None, twilight=None, tracks=False, dist=0.0,
+          pa=0.0, radius=0.0, pred_error=0.0, sites=None, texts=None,
+          auto_labels=True, zoom_latlon=None, zoom_xy=None,
           print_diagnostic=False, ax=None, plot_label=None):
     """Draw the occultation shadow map (the smGlobe product).
 
@@ -1343,6 +1343,14 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
         drawn in ``night_land_color`` (default: land blended 50/50
         toward the shadow tone, so land/ocean contrast survives into
         the night) — any matplotlib colors.
+    twilight : graded night shading (opt-in; the default None keeps the
+        single shadow at ``horizon_angle``).  True draws the standard
+        bands at 0/6/12/18 deg sun depression, shaded from light down
+        to ``shadow_gray`` at full night; or pass explicit
+        ``[(angle_deg, color), ...]`` bands (lightest/shallowest
+        first).  ``twilight`` supersedes ``horizon_angle``; with a land
+        fill, each band derives its own night-land tone
+        (``night_land_color`` applies only to the single-shadow mode).
     tracks, dist, pa, radius, pred_error : draw the shadow-track band
         (see shadow_tracks).  On the orthographic map these are the
         straight fundamental-plane lines; on mercator/equirectangular
@@ -1403,10 +1411,23 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
         plot_land(ax, view_lat, view_lon, projection, color=land_color,
                   zorder=0.6)
 
-    poly = night_polygon(view_lat, view_lon, anti_lat, anti_lon,
-                         horizon_angle, projection)
-    night_patch = None
-    if len(poly):
+    # night shading: one cap at horizon_angle, or graded twilight bands
+    if twilight is None:
+        bands = [(horizon_angle, (shadow_gray,) * 3)]
+    elif twilight is True:
+        # civil/nautical/astronomical/full-night, lightest to deepest,
+        # the deepest at shadow_gray
+        angles = (0.0, 6.0, 12.0, 18.0)
+        bands = [(a, (1.0 - (1.0 - shadow_gray) * (i + 1) / len(angles),) * 3)
+                 for i, a in enumerate(angles)]
+    else:
+        bands = [(a, to_rgb(c)) for a, c in twilight]
+
+    for k, (h_band, tone) in enumerate(bands):
+        poly = night_polygon(view_lat, view_lon, anti_lat, anti_lon,
+                             h_band, projection)
+        if not len(poly):
+            continue
         verts = []
         codes = []
         for s in shifts:   # cylindrical night region tiles mod 2*pi
@@ -1416,16 +1437,17 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
                 [[Path.MOVETO], np.full(len(shifted) - 1, Path.LINETO),
                  [Path.CLOSEPOLY]]))
         night_patch = PathPatch(Path(np.vstack(verts), np.concatenate(codes)),
-                                facecolor=(shadow_gray,) * 3,
-                                edgecolor="none", zorder=1)
+                                facecolor=tone, edgecolor="none",
+                                zorder=1 + 0.02 * k)
         ax.add_patch(night_patch)
         if land_color is not None:
-            nl = night_land_color
-            if nl is None:
+            if night_land_color is not None and twilight is None:
+                nl = night_land_color
+            else:
                 nl = tuple(0.5 * (a + b) for a, b in
-                           zip(to_rgb(land_color), (shadow_gray,) * 3))
+                           zip(to_rgb(land_color), tone))
             plot_land(ax, view_lat, view_lon, projection, color=nl,
-                      zorder=1.2, clip_patch=night_patch)
+                      zorder=1.01 + 0.02 * k, clip_patch=night_patch)
     for line in coastline_outlines(view_lat, view_lon, projection):
         ax.plot(line[:, 0], line[:, 1], color="black", linewidth=0.5,
                 zorder=2)

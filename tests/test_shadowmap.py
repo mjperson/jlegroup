@@ -885,9 +885,8 @@ def test_globe_styling_layers():
                   land_color="0.93", ocean_color="white")
     # limb + night + ocean disk + day-land features + clipped night-land
     assert len(ax.patches) > 100
-    night_land = [p for p in ax.patches if p.get_zorder() == 1.2]
+    night_land = [p for p in ax.patches if p.get_clip_path() is not None]
     assert len(night_land) > 30
-    assert all(p.get_clip_path() is not None for p in night_land)
     plt.close(ax.figure)
 
     ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
@@ -895,6 +894,38 @@ def test_globe_styling_layers():
                   ocean_color="0.99", night_land_color="0.7",
                   zoom_latlon=(12.0, 62.0, -130.0, -55.0))
     assert len(ax.patches) > 100
+    plt.close(ax.figure)
+
+
+def test_twilight_bands():
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import PathPatch
+
+    # outlines only: four band patches, lightest 0.95 down to
+    # shadow_gray at full night
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                  twilight=True)
+    bands = [p for p in ax.patches if isinstance(p, PathPatch)]
+    assert len(bands) == 4
+    tones = sorted(round(p.get_facecolor()[0], 6) for p in bands)
+    assert tones == [0.8, 0.85, 0.9, 0.95]
+    plt.close(ax.figure)
+
+    # with a land fill every band derives its own night-land tone
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                  twilight=True, land_color="0.93")
+    clipped = [p for p in ax.patches if p.get_clip_path() is not None]
+    assert len({round(p.get_facecolor()[0], 6) for p in clipped}) == 4
+    plt.close(ax.figure)
+
+    # custom bands pass through verbatim
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                  twilight=[(0.0, "0.9"), (18.0, "0.7")])
+    bands = [p for p in ax.patches if isinstance(p, PathPatch)]
+    assert len(bands) == 2
+    assert {round(p.get_facecolor()[0], 6) for p in bands} == {0.9, 0.7}
     plt.close(ax.figure)
 
 
