@@ -510,15 +510,19 @@ class Site:
     color : symbol (and label) color.
     label : optional text drawn beside the symbol.
     label_size : label font size, points.
-    label_offset : (dx, dy) label offset from the symbol, in points;
-        with the default ha/va the label sits to the upper right.  In a
-        crowded field, push the label well clear (20-40 pt) and let the
-        leader line connect it back to its symbol.
-    label_ha, label_va : label anchoring (matplotlib ha/va), so labels
-        can be flipped to any side of the symbol to avoid collisions.
+    label_offset : label placement control.  None (the default) leaves
+        placement to the automatic declutter pass of plot_sites (falling
+        back to 4 pt upper-right when that pass is disabled).  An
+        explicit (dx, dy) in points PINS the label there — the declutter
+        pass never moves a pinned label, and routes other labels around
+        it.  In a crowded field, pin well clear (20-40 pt) and the
+        leader line connects the label back to its symbol.
+    label_ha, label_va : label anchoring (matplotlib ha/va) for pinned
+        placement; the declutter pass chooses its own anchoring.
     leader : draw a thin line connecting a pushed-out label back to its
         symbol.  None (default) = automatic: a leader appears when the
-        label offset exceeds 12 pt; True/False force it on/off.
+        (pinned or auto-chosen) offset exceeds 12 pt; True/False force
+        it on/off.
     """
 
     lat_deg: float
@@ -529,7 +533,7 @@ class Site:
     color: str = "black"
     label: str | None = None
     label_size: float = 8.0
-    label_offset: tuple = (4.0, 4.0)
+    label_offset: tuple | None = None
     label_ha: str = "left"
     label_va: str = "bottom"
     leader: bool | None = None
@@ -537,11 +541,18 @@ class Site:
     #: offset length (points) beyond which leader=None draws a leader.
     LEADER_AUTO_THRESHOLD = 12.0
 
-    def wants_leader(self):
-        """Whether this site's label gets a leader line."""
+    #: fallback placement when declutter is off and no offset is pinned.
+    DEFAULT_OFFSET = (4.0, 4.0)
+
+    def wants_leader(self, offset=None):
+        """Whether the label gets a leader line, for the offset actually
+        used (defaults to the pinned offset / fallback)."""
         if self.leader is not None:
             return self.leader
-        return math.hypot(*self.label_offset) > self.LEADER_AUTO_THRESHOLD
+        off = offset if offset is not None else self.label_offset
+        if off is None:
+            off = self.DEFAULT_OFFSET
+        return math.hypot(*off) > self.LEADER_AUTO_THRESHOLD
 
 
 @dataclass(frozen=True)
@@ -562,37 +573,156 @@ class MapText:
     rotation: float = 0.0
 
 
+#: Candidate label directions for the declutter pass, in preference
+#: order (upper-right first, cartographic convention), each with the
+#: text anchoring that keeps the label on that side of the symbol.
+_LABEL_DIRECTIONS = (
+    (0.7071, 0.7071, "left", "bottom"),     # NE
+    (-0.7071, 0.7071, "right", "bottom"),   # NW
+    (0.7071, -0.7071, "left", "top"),       # SE
+    (-0.7071, -0.7071, "right", "top"),     # SW
+    (1.0, 0.0, "left", "center"),           # E
+    (-1.0, 0.0, "right", "center"),         # W
+    (0.0, 1.0, "center", "bottom"),         # N
+    (0.0, -1.0, "center", "top"),           # S
+)
+
+#: Candidate ring radii, points: a close ring, then two leader rings.
+_LABEL_RINGS = (5.0, 24.0, 38.0)
+
+#: Clearance margin between placed rectangles, points.
+_LABEL_MARGIN = 1.5
+
+
+def _text_extent_points(ax, text, fontsize):
+    """(width, height) of a text in points, measured with the figure's
+    renderer."""
+    fig = ax.figure
+    try:
+        renderer = fig.canvas.get_renderer()
+    except AttributeError:              # backend without get_renderer
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+    probe = ax.text(0.0, 0.0, text, fontsize=fontsize,
+                    transform=ax.transAxes)
+    ext = probe.get_window_extent(renderer=renderer)
+    probe.remove()
+    scale = 72.0 / fig.dpi
+    return ext.width * scale, ext.height * scale
+
+
+def _anchor_rect(px, py, off, w, h, ha, va):
+    """Rectangle (x0, y0, x1, y1) of a w x h label anchored at
+    (px, py) + off with the given ha/va, all in points."""
+    x = px + off[0] - {"left": 0.0, "center": 0.5, "right": 1.0}[ha] * w
+    y = py + off[1] - {"bottom": 0.0, "center": 0.5, "top": 1.0}[va] * h
+    return (x, y, x + w, y + h)
+
+
+def _overlap_area(a, b, margin=_LABEL_MARGIN):
+    """Overlap area of two rectangles inflated by ``margin`` on each side."""
+    w = min(a[2], b[2]) - max(a[0], b[0]) + 2.0 * margin
+    h = min(a[3], b[3]) - max(a[1], b[1]) + 2.0 * margin
+    return max(0.0, w) * max(0.0, h)
+
+
 def plot_sites(ax, sites, view_lat_deg, view_lon_deg,
-               projection="orthographic"):
+               projection="orthographic", auto_labels=True):
     """Draw Site markers (and their labels) on an existing map axes.
 
     Sites on the hidden hemisphere of an orthographic map are skipped.
-    Returns the list of sites actually drawn.
+
+    With ``auto_labels=True`` (the default), labels whose Site does not
+    pin a ``label_offset`` are placed by a deterministic declutter pass:
+    each label tries 8 compass positions on rings of 5/24/38 pt (in
+    input order, upper-right preferred) and takes the first spot clear
+    of every symbol, every pinned label, and every label already placed
+    — falling back to the least-overlapping candidate when the field is
+    too crowded.  Leader lines appear automatically for placements
+    beyond the 12 pt threshold.  Pinned labels are never moved.  Call
+    this after the map (and the axes limits) are drawn, so screen
+    geometry is final.
+
+    With ``auto_labels=False`` every label uses its pinned offset, or
+    the 4 pt upper-right fallback.  Returns the list of sites drawn.
     """
-    drawn = []
+    fig = ax.figure
+    scale = 72.0 / fig.dpi
+    ax.apply_aspect()   # finalize the data->screen transform before measuring
+
+    visible = []
     for site in sites:
-        x, y, visible = map_coordinates(site.lat_deg, site.lon_deg,
-                                        view_lat_deg, view_lon_deg,
-                                        projection)
-        if not visible:
-            continue
+        x, y, vis = map_coordinates(site.lat_deg, site.lon_deg,
+                                    view_lat_deg, view_lon_deg, projection)
+        if vis:
+            visible.append((site, x, y))
+
+    # symbols first; collect their screen anchors and obstacle boxes
+    anchors = []
+    obstacles = []
+    for site, x, y in visible:
         ax.plot([x], [y], linestyle="none", marker=site.marker,
                 markersize=site.size,
                 markerfacecolor=site.color if site.filled else "none",
                 markeredgecolor=site.color, zorder=6)
-        if site.label:
-            arrowprops = None
-            if site.wants_leader():
-                # plain thin line, stopped short of the marker edge
-                arrowprops = dict(arrowstyle="-", linewidth=0.6,
-                                  color=site.color, shrinkA=2.0,
-                                  shrinkB=site.size / 2.0 + 1.5, zorder=6)
-            ax.annotate(site.label, (x, y), textcoords="offset points",
-                        xytext=site.label_offset, fontsize=site.label_size,
-                        color=site.color, ha=site.label_ha, va=site.label_va,
-                        arrowprops=arrowprops, zorder=7)
-        drawn.append(site)
-    return drawn
+        px, py = ax.transData.transform((x, y)) * scale
+        anchors.append((px, py))
+        half = site.size / 2.0 + 1.0
+        obstacles.append((px - half, py - half, px + half, py + half))
+
+    labeled = [(i, site) for i, (site, _, _) in enumerate(visible)
+               if site.label]
+    extents = {i: _text_extent_points(ax, site.label, site.label_size)
+               for i, site in labeled}
+
+    # pinned labels (and every label when auto is off) become obstacles
+    placements = {}
+    for i, site in labeled:
+        if auto_labels and site.label_offset is None:
+            continue
+        off = site.label_offset if site.label_offset is not None \
+            else Site.DEFAULT_OFFSET
+        placements[i] = (off, site.label_ha, site.label_va)
+        obstacles.append(_anchor_rect(*anchors[i], off, *extents[i],
+                                      site.label_ha, site.label_va))
+
+    # declutter the rest: first collision-free candidate, else least bad.
+    # A site's own symbol box (obstacles[i]) is not an obstacle to its
+    # own label — close placement hugging the marker is the ideal.
+    for i, site in labeled:
+        if i in placements:
+            continue
+        best = None
+        best_area = math.inf
+        for ring in _LABEL_RINGS:
+            for ux, uy, ha, va in _LABEL_DIRECTIONS:
+                off = (ux * ring, uy * ring)
+                rect = _anchor_rect(*anchors[i], off, *extents[i], ha, va)
+                area = sum(_overlap_area(rect, o)
+                           for j, o in enumerate(obstacles) if j != i)
+                if area < best_area:
+                    best, best_area = (off, ha, va, rect), area
+                if area == 0.0:
+                    break
+            if best_area == 0.0:
+                break
+        placements[i] = best[:3]
+        obstacles.append(best[3])
+
+    for i, site in labeled:
+        off, ha, va = placements[i]
+        arrowprops = None
+        if site.wants_leader(off):
+            # plain thin line, stopped short of the marker edge
+            arrowprops = dict(arrowstyle="-", linewidth=0.6,
+                              color=site.color, shrinkA=2.0,
+                              shrinkB=site.size / 2.0 + 1.5, zorder=6)
+        x, y = visible[i][1], visible[i][2]
+        ax.annotate(site.label, (x, y), textcoords="offset points",
+                    xytext=off, fontsize=site.label_size, color=site.color,
+                    ha=ha, va=va, arrowprops=arrowprops, zorder=7)
+
+    return [site for site, _, _ in visible]
 
 
 def plot_texts(ax, texts, view_lat_deg, view_lon_deg,
@@ -915,8 +1045,8 @@ def offset_prediction(ra, dec, ra_offset, dec_offset, b_arcsec, pa_deg,
 
 def globe(star, time, projection="orthographic", horizon_angle=0.0,
           shadow_gray=0.8, tracks=False, dist=0.0, pa=0.0, radius=0.0,
-          pred_error=0.0, sites=None, texts=None, print_diagnostic=False,
-          ax=None, plot_label=None):
+          pred_error=0.0, sites=None, texts=None, auto_labels=True,
+          print_diagnostic=False, ax=None, plot_label=None):
     """Draw the occultation shadow map (the smGlobe product).
 
     star : SkyCoord (any frame), "HH MM SS ±DD MM SS" string, or an
@@ -941,6 +1071,8 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
         skipped on the orthographic map).
     texts : iterable of MapText — free text placed by geographic lat/lon
         (see plot_texts).
+    auto_labels : run the declutter pass on site labels that do not pin
+        a label_offset (see plot_sites); pinned labels are never moved.
     print_diagnostic : print the track diagnostic note (with
         tracks=True), as in the original.
     ax : matplotlib axes to draw into (a new figure is created if None).
@@ -1008,11 +1140,14 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
                             linewidth=0.8, linestyle="--", zorder=4)
             if print_diagnostic and tp.note:
                 print(tp.note)
+    ax.set_aspect("equal")
+    # annotations go last, once limits and aspect are final — the
+    # declutter pass measures real screen geometry
     if sites:
-        plot_sites(ax, sites, view_lat, view_lon, projection)
+        plot_sites(ax, sites, view_lat, view_lon, projection,
+                   auto_labels=auto_labels)
     if texts:
         plot_texts(ax, texts, view_lat, view_lon, projection)
-    ax.set_aspect("equal")
     ax.set_axis_off()
     if plot_label is not None:
         ax.set_title(plot_label)

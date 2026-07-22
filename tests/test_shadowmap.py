@@ -583,6 +583,87 @@ def test_site_leader_lines():
     plt.close(fig)
 
 
+_CLUSTER_SITES = [
+    ("MIT", 42.3601, -71.0942),
+    ("Wallace", 42.6105, -71.4817),
+    ("Ottawa", 45.4215, -75.6972),
+    ("Miami", 25.7617, -80.1918),
+    ("Lowell Obs.", 35.2028, -111.6646),
+]
+
+
+def _cluster_globe(**site_kw_by_name):
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    sites = [sm.Site(lat, lon, label=name, **site_kw_by_name.get(name, {}))
+             for name, lat, lon in _CLUSTER_SITES]
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                  tracks=True, dist=0.2, pa=20.0, radius=0.2, sites=sites)
+    return ax
+
+
+def _label_extents(ax):
+    # Text-only boxes: Annotation.get_window_extent unions in the leader
+    # line's bbox, which is not what label-collision checks should use.
+    from matplotlib.text import Text
+    ax.figure.canvas.draw()
+    renderer = ax.figure.canvas.get_renderer()
+    return {t.get_text(): Text.get_window_extent(t, renderer)
+            for t in ax.texts}
+
+
+def test_declutter_resolves_cluster():
+    # The five-site reference cluster (MIT/Wallace 35 km apart, Ottawa
+    # nearby): with the declutter pass, no two rendered labels overlap.
+    import matplotlib.pyplot as plt
+    ax = _cluster_globe()
+    ext = _label_extents(ax)
+    names = list(ext)
+    assert len(names) == 5
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            ea, eb = ext[a], ext[b]
+            assert (ea.x1 <= eb.x0 or eb.x1 <= ea.x0
+                    or ea.y1 <= eb.y0 or eb.y1 <= ea.y0), (a, b)
+    plt.close(ax.figure)
+
+
+def test_declutter_respects_pinned_label():
+    import matplotlib.pyplot as plt
+    ax = _cluster_globe(MIT=dict(label_offset=(6.0, -7.0),
+                                 label_ha="left", label_va="top"))
+    ann = {t.get_text(): t for t in ax.texts}
+    assert ann["MIT"].xyann == (6.0, -7.0)          # pinned, not moved
+    assert ann["MIT"].get_ha() == "left"
+    assert ann["MIT"].get_va() == "top"
+    plt.close(ax.figure)
+
+
+def test_declutter_is_deterministic():
+    import matplotlib.pyplot as plt
+    offs = []
+    for _ in range(2):
+        ax = _cluster_globe()
+        offs.append(sorted((t.get_text(), t.xyann) for t in ax.texts))
+        plt.close(ax.figure)
+    assert offs[0] == offs[1]
+
+
+def test_auto_labels_off_restores_fallback():
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    sites = [sm.Site(42.36, -71.09, label="a"),
+             sm.Site(42.61, -71.48, label="b",
+                     label_offset=(-20.0, 10.0), label_ha="right")]
+    sm.plot_sites(ax, sites, 42.36, -71.09, auto_labels=False)
+    ann = {t.get_text(): t for t in ax.texts}
+    assert ann["a"].xyann == sm.Site.DEFAULT_OFFSET
+    assert ann["b"].xyann == (-20.0, 10.0)
+    plt.close(fig)
+
+
 def test_globe_with_sites_and_texts(tmp_path):
     import matplotlib
     matplotlib.use("Agg", force=True)
