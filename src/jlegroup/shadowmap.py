@@ -23,6 +23,17 @@ view-frame coordinates are also provided.  Function mapping:
     dist_from_impact_parameter  smDist
     offset_prediction           smOffset
 
+New annotation and styling layer (no Mathematica counterpart; defaults
+keep the clean bulk-production map — everything below is opt-in):
+``Site``/``plot_sites`` — marker symbols with labels placed by lat/lon,
+automatic label decluttering with per-site pinning override and leader
+lines; ``MapText``/``plot_texts`` — free text by lat/lon, treated as
+obstacles by the declutter pass; ``map_coordinates``/``map_window`` —
+the placement and zoom engines (``globe(zoom_latlon=..., zoom_xy=...)``);
+``land_polygons``/``plot_land`` and ``globe(land_color=, ocean_color=,
+night_land_color=)`` — Natural Earth land fills with night-side tones;
+``globe(twilight=...)`` — graded sun-depression bands.
+
 Design: superior implementations preferred over porting (maintainer
 direction, 2026-07-14).  Concretely:
 
