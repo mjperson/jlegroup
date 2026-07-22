@@ -117,6 +117,11 @@ __all__ = [
     "PROJECTIONS",
     "TrackSet",
     "OffsetResult",
+    "Site",
+    "MapText",
+    "map_coordinates",
+    "plot_sites",
+    "plot_texts",
     "star_coord",
     "as_time",
     "substar_point",
@@ -457,6 +462,136 @@ def night_polygon(view_lat_deg, view_lon_deg, antisolar_lat_deg,
 
 
 # ---------------------------------------------------------------------------
+# Sites and text annotations (Labelling feature, new in this package)
+# ---------------------------------------------------------------------------
+
+
+def map_coordinates(lat_deg, lon_deg, view_lat_deg, view_lon_deg,
+                    projection="orthographic"):
+    """Geographic (lat, lon) [degrees] -> map plot coordinates.
+
+    Returns ``(x, y, visible)``; accepts scalars or arrays (arrays in,
+    arrays out).  For the orthographic map ``visible`` is False for
+    points on the far hemisphere (which project to mirror positions
+    inside the disk — do not draw them); cylindrical projections show
+    the whole Earth, so ``visible`` is always True there.
+
+    This is the placement engine for plot_sites/plot_texts and for any
+    custom annotation a user wants to draw on a shadow map.
+    """
+    _check_projection(projection)
+    scalar = np.isscalar(lat_deg) and np.isscalar(lon_deg)
+    latp, lonp = view_rotation(np.radians(np.asarray(lat_deg, dtype=float)),
+                               np.radians(np.asarray(lon_deg, dtype=float)),
+                               view_lat_deg, view_lon_deg)
+    latp = np.atleast_1d(latp)
+    lonp = np.atleast_1d(lonp)
+    xy = _project(latp, lonp, projection)
+    if projection == "orthographic":
+        visible = np.abs(lonp) < math.pi / 2.0
+    else:
+        visible = np.ones(len(lonp), dtype=bool)
+    if scalar:
+        return float(xy[0, 0]), float(xy[0, 1]), bool(visible[0])
+    return xy[:, 0], xy[:, 1], visible
+
+
+@dataclass(frozen=True)
+class Site:
+    """A site to mark on the map: a symbol at geographic lat/lon, with an
+    optional label.
+
+    lat_deg, lon_deg : geographic position, degrees (east longitude).
+    marker : any matplotlib marker ("o" circle, "s" square, "^" triangle,
+        "*", "x", "+", ...).
+    filled : filled symbol (True) or open outline (False; ignored by
+        line markers like "x"/"+").
+    size : symbol size in points.
+    color : symbol (and label) color.
+    label : optional text drawn beside the symbol.
+    label_size : label font size, points.
+    label_offset : (dx, dy) label offset from the symbol, in points;
+        with the default ha/va the label sits to the upper right.
+    label_ha, label_va : label anchoring (matplotlib ha/va), so labels
+        can be flipped to any side of the symbol to avoid collisions.
+    """
+
+    lat_deg: float
+    lon_deg: float
+    marker: str = "o"
+    filled: bool = True
+    size: float = 6.0
+    color: str = "black"
+    label: str | None = None
+    label_size: float = 8.0
+    label_offset: tuple = (4.0, 4.0)
+    label_ha: str = "left"
+    label_va: str = "bottom"
+
+
+@dataclass(frozen=True)
+class MapText:
+    """Free-standing text placed by geographic lat/lon.
+
+    ha/va anchor the text on its point; rotation is in degrees
+    counterclockwise (screen frame).
+    """
+
+    lat_deg: float
+    lon_deg: float
+    text: str
+    size: float = 9.0
+    color: str = "black"
+    ha: str = "center"
+    va: str = "center"
+    rotation: float = 0.0
+
+
+def plot_sites(ax, sites, view_lat_deg, view_lon_deg,
+               projection="orthographic"):
+    """Draw Site markers (and their labels) on an existing map axes.
+
+    Sites on the hidden hemisphere of an orthographic map are skipped.
+    Returns the list of sites actually drawn.
+    """
+    drawn = []
+    for site in sites:
+        x, y, visible = map_coordinates(site.lat_deg, site.lon_deg,
+                                        view_lat_deg, view_lon_deg,
+                                        projection)
+        if not visible:
+            continue
+        ax.plot([x], [y], linestyle="none", marker=site.marker,
+                markersize=site.size,
+                markerfacecolor=site.color if site.filled else "none",
+                markeredgecolor=site.color, zorder=6)
+        if site.label:
+            ax.annotate(site.label, (x, y), textcoords="offset points",
+                        xytext=site.label_offset, fontsize=site.label_size,
+                        color=site.color, ha=site.label_ha, va=site.label_va,
+                        zorder=7)
+        drawn.append(site)
+    return drawn
+
+
+def plot_texts(ax, texts, view_lat_deg, view_lon_deg,
+               projection="orthographic"):
+    """Draw MapText annotations on an existing map axes (hidden-hemisphere
+    texts are skipped on the orthographic map).  Returns the texts drawn."""
+    drawn = []
+    for note in texts:
+        x, y, visible = map_coordinates(note.lat_deg, note.lon_deg,
+                                        view_lat_deg, view_lon_deg,
+                                        projection)
+        if not visible:
+            continue
+        ax.text(x, y, note.text, fontsize=note.size, color=note.color,
+                ha=note.ha, va=note.va, rotation=note.rotation, zorder=7)
+        drawn.append(note)
+    return drawn
+
+
+# ---------------------------------------------------------------------------
 # Shadow tracks (ported from drawtracks) and diagnostics
 # ---------------------------------------------------------------------------
 
@@ -759,7 +894,8 @@ def offset_prediction(ra, dec, ra_offset, dec_offset, b_arcsec, pa_deg,
 
 def globe(star, time, projection="orthographic", horizon_angle=0.0,
           shadow_gray=0.8, tracks=False, dist=0.0, pa=0.0, radius=0.0,
-          pred_error=0.0, print_diagnostic=False, ax=None, plot_label=None):
+          pred_error=0.0, sites=None, texts=None, print_diagnostic=False,
+          ax=None, plot_label=None):
     """Draw the occultation shadow map (the smGlobe product).
 
     star : SkyCoord (any frame), "HH MM SS ±DD MM SS" string, or an
@@ -779,6 +915,11 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
         maps the on-Earth ground tracks are drawn instead (see
         track_ground_paths) — lines that miss the Earth have no ground
         track there.
+    sites : iterable of Site — symbols (with optional labels) placed by
+        geographic lat/lon (see plot_sites; hidden-hemisphere sites are
+        skipped on the orthographic map).
+    texts : iterable of MapText — free text placed by geographic lat/lon
+        (see plot_texts).
     print_diagnostic : print the track diagnostic note (with
         tracks=True), as in the original.
     ax : matplotlib axes to draw into (a new figure is created if None).
@@ -846,6 +987,10 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
                             linewidth=0.8, linestyle="--", zorder=4)
             if print_diagnostic and tp.note:
                 print(tp.note)
+    if sites:
+        plot_sites(ax, sites, view_lat, view_lon, projection)
+    if texts:
+        plot_texts(ax, texts, view_lat, view_lon, projection)
     ax.set_aspect("equal")
     ax.set_axis_off()
     if plot_label is not None:

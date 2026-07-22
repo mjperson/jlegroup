@@ -510,6 +510,75 @@ def test_offset_prediction_input_validation():
 
 
 # ---------------------------------------------------------------------------
+# Sites and text annotations (Labelling)
+# ---------------------------------------------------------------------------
+
+
+def test_map_coordinates_center_and_visibility():
+    x, y, vis = sm.map_coordinates(42.36, -71.09, 42.36, -71.09)
+    assert vis and abs(x) < 1e-12 and abs(y) < 1e-12
+    # the antipode of the view center is hidden on the orthographic map
+    x, y, vis = sm.map_coordinates(-42.36, 108.91, 42.36, -71.09)
+    assert not vis
+    # ... but always "visible" on a cylindrical map
+    _, _, vis = sm.map_coordinates(-42.36, 108.91, 42.36, -71.09,
+                                   "equirectangular")
+    assert vis
+
+
+def test_map_coordinates_arrays_match_projection_chain():
+    lats = np.array([10.0, -30.0, 60.0])
+    lons = np.array([50.0, -120.0, -71.0])
+    xs, ys, vis = sm.map_coordinates(lats, lons, 42.36, -71.09)
+    latp, lonp = sm.view_rotation(np.radians(lats), np.radians(lons),
+                                  42.36, -71.09)
+    assert np.allclose(xs, np.cos(latp) * np.sin(lonp), atol=1e-12)
+    assert np.allclose(ys, np.sin(latp), atol=1e-12)
+    assert vis.dtype == bool and len(vis) == 3
+
+
+def test_plot_sites_hidden_hemisphere_skipped():
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+    sites = [sm.Site(42.36, -71.09, label="MIT"),
+             sm.Site(-42.36, 108.91, label="far side"),
+             sm.Site(25.76, -80.19, marker="s", filled=False)]
+    drawn = sm.plot_sites(ax, sites, 42.36, -71.09)
+    assert len(drawn) == 2                       # far-side site skipped
+    assert len(ax.lines) == 2                    # one marker artist per site
+    assert len(ax.texts) == 1                    # only MIT carries a label
+    notes = sm.plot_texts(ax, [sm.MapText(30.0, -60.0, "note"),
+                               sm.MapText(-42.36, 108.91, "hidden")],
+                          42.36, -71.09)
+    assert len(notes) == 1
+    assert len(ax.texts) == 2
+    plt.close(fig)
+
+
+def test_globe_with_sites_and_texts(tmp_path):
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    sites = [sm.Site(42.3601, -71.0942, label="MIT"),
+             sm.Site(35.2028, -111.6646, marker="^", label="Lowell")]
+    texts = [sm.MapText(28.0, -45.0, "2026-10-01 04:00 UT", size=8)]
+    for proj in sm.PROJECTIONS:
+        ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                      projection=proj, tracks=True, dist=0.2, pa=20.0,
+                      radius=0.2, sites=sites, texts=texts)
+        markers = [ln for ln in ax.lines
+                   if ln.get_marker() not in ("", "None", None)]
+        assert len(markers) == 2, proj
+        assert any("04:00 UT" in txt.get_text() for txt in ax.texts), proj
+        ax.figure.savefig(tmp_path / f"sites_{proj}.png", dpi=72)
+        plt.close(ax.figure)
+
+
+# ---------------------------------------------------------------------------
 # The full map
 # ---------------------------------------------------------------------------
 
