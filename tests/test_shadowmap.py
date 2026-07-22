@@ -304,7 +304,9 @@ def test_night_polygon_boundary_at_horizon_angle(h, tol_deg):
     view_lat, view_lon = 37.3, -14.2
     anti_lat, anti_lon = -21.4, 133.7
     poly = sm.night_polygon(view_lat, view_lon, anti_lat, anti_lon, h,
-                            "equirectangular")
+                            "equirectangular")[:203]   # boundary only:
+    # pole-edge closure vertices (appended past the 203 cap points when
+    # the cap encloses a view pole) are not terminator points
     lat, lon = sm.view_rotation_inverse(poly[:, 1], poly[:, 0],
                                         view_lat, view_lon)
     cosd = (math.sin(math.radians(anti_lat)) * np.sin(lat)
@@ -323,7 +325,7 @@ def test_night_polygon_terminator_via_astropy_sun():
         sm.star_coord("17 45 31.20", "-22 28 45.5"), t)
     anti_lat, anti_lon = sm.antisolar_point(t)
     poly = sm.night_polygon(view_lat, view_lon, anti_lat, anti_lon, h,
-                            "equirectangular")
+                            "equirectangular")[:203]   # boundary only
     lat, lon = sm.view_rotation_inverse(poly[:, 1], poly[:, 0],
                                         view_lat, view_lon)
     sun = get_sun(t).transform_to(ITRS(obstime=t)).spherical
@@ -362,6 +364,40 @@ def test_night_polygon_invisible_returns_empty():
     # nothing to shade.  (The original's clipper errored in this case.)
     poly = sm.night_polygon(0.0, 0.0, 0.0, 180.0, 18.0, "orthographic")
     assert poly.shape == (0, 2)
+
+
+@pytest.mark.parametrize("vlat,vlon,alat,alon,h", [
+    (42.36, -71.09, -23.21, 107.12, 0.0),    # v4 geometry: seam-crossing cap
+    (42.36, -71.09, -23.21, 107.12, 12.0),
+    (0.0, 0.0, 80.0, 10.0, 0.0),             # cap enclosing a view pole
+    (0.0, 0.0, -80.0, 10.0, 6.0),            # ... the south one
+    (-20.67, 114.24, 23.21, -72.88, 12.0),   # 2015-like band geometry
+    (37.3, -14.2, -21.4, 133.7, 6.0),        # pole-enclosed, off-center
+])
+def test_night_region_cylindrical_matches_truth(vlat, vlon, alat, alon, h):
+    # The filled polygon (tiled mod 2*pi, as globe draws it) must contain
+    # exactly the points whose angular distance from the antisolar point
+    # is below 90-h deg.  Random earth points, 2.5 deg terminator margin.
+    from matplotlib.path import Path
+
+    poly = sm.night_polygon(vlat, vlon, alat, alon, h, "equirectangular")
+    paths = [Path(poly + np.array([s, 0.0]))
+             for s in (-2.0 * math.pi, 0.0, 2.0 * math.pi)]
+    rng = np.random.default_rng(7)
+    lat = np.degrees(np.arcsin(rng.uniform(-1.0, 1.0, 600)))
+    lon = np.degrees(rng.uniform(-math.pi, math.pi, 600))
+    cosd = (np.sin(np.radians(lat)) * math.sin(math.radians(alat))
+            + np.cos(np.radians(lat)) * math.cos(math.radians(alat))
+            * np.cos(np.radians(lon - alon)))
+    d = np.degrees(np.arccos(np.clip(cosd, -1.0, 1.0)))
+    clear = np.abs(d - (90.0 - h)) > 2.5
+    truth = d < (90.0 - h)
+    xs, ys, _ = sm.map_coordinates(lat, lon, vlat, vlon, "equirectangular")
+    pts = np.column_stack([xs, ys])
+    inside = np.zeros(len(pts), dtype=bool)
+    for p in paths:
+        inside |= p.contains_points(pts)
+    assert np.array_equal(inside[clear], truth[clear])
 
 
 # ---------------------------------------------------------------------------
@@ -647,6 +683,41 @@ def test_declutter_is_deterministic():
         offs.append(sorted((t.get_text(), t.xyann) for t in ax.texts))
         plt.close(ax.figure)
     assert offs[0] == offs[1]
+
+
+def test_declutter_avoids_maptexts():
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+    from matplotlib.text import Text
+
+    # A MapText parked exactly on the site's preferred NE quadrant: with
+    # avoid_texts the auto label must land clear of it; without, it
+    # overprints.  Measured from rendered text-only extents.
+    site = sm.Site(42.36, -71.09, label="Station")
+    note = sm.MapText(42.36, -71.09, "BLOCKER", size=10,
+                      ha="left", va="bottom")
+
+    def render(avoid):
+        fig, ax = plt.subplots()
+        sm.plot_sites(ax, [site], 42.36, -71.09,
+                      avoid_texts=[note] if avoid else None)
+        sm.plot_texts(ax, [note], 42.36, -71.09)
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        ext = {t.get_text(): Text.get_window_extent(t, renderer)
+               for t in ax.texts}
+        plt.close(fig)
+        return ext["Station"], ext["BLOCKER"]
+
+    def overlaps(a, b):
+        return not (a.x1 <= b.x0 or b.x1 <= a.x0
+                    or a.y1 <= b.y0 or b.y1 <= a.y0)
+
+    with_avoid = render(avoid=True)
+    without = render(avoid=False)
+    assert not overlaps(*with_avoid)
+    assert overlaps(*without)          # proves the obstacle changed it
 
 
 def test_auto_labels_off_restores_fallback():

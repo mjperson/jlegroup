@@ -429,9 +429,14 @@ def night_polygon(view_lat_deg, view_lon_deg, antisolar_lat_deg,
 
     The high-level ``globe`` computes the antisolar point with astropy;
     this function is pure spherical geometry (testable in isolation).
-    Cylindrical projections draw the full cap without clipping (as in
-    the original); a cap crossing the ±180 deg view meridian will smear
-    across such maps — prefer the orthographic view in that geometry.
+
+    Cylindrical projections return the night region as a single closed
+    polygon in CONTINUOUS (unwrapped) view longitude: x may extend
+    beyond ±pi, and when the cap encloses a view-frame pole the polygon
+    is closed along that pole's map edge (two extra vertices appended
+    after the 203 boundary points).  The region tiles with period 2*pi
+    in x — draw it at x and x ± 2*pi, as ``globe`` does, and any part
+    beyond the map limits clips away.
     """
     _check_projection(projection)
     vf_lat, vf_lon = view_rotation(math.radians(antisolar_lat_deg),
@@ -458,7 +463,25 @@ def night_polygon(view_lat_deg, view_lon_deg, antisolar_lat_deg,
         if len(clipped) == 0:
             return clipped
         return _project(clipped[:, 0], clipped[:, 1], "orthographic")
-    return _project(latp, lonp, projection)
+    # Cylindrical: unwrap the boundary so the polygon is contiguous even
+    # when the cap crosses the ±pi view meridian.  The closed boundary
+    # comes back to its start (closure ~ 0) unless the cap encloses a
+    # view-frame pole (closure ±2*pi) — then close along that pole's map
+    # edge (clamped short of the pole on the mercator map, whose y
+    # diverges there; the fill clips at the axes limits anyway).
+    lonu = np.unwrap(lonp)
+    lat_out, lon_out = latp, lonu
+    if abs(lonu[-1] - lonu[0]) > math.pi:
+        pole_sign = math.copysign(1.0, vf_lat)
+        pole_lat = pole_sign * (math.pi / 2.0
+                                if projection == "equirectangular"
+                                else math.pi / 2.0 - 1e-3)
+        lat_out = np.concatenate([latp, [pole_lat, pole_lat]])
+        lon_out = np.concatenate([lonu, [lonu[-1], lonu[0]]])
+    # representative copy nearest the principal window
+    lon_out = lon_out - round(float(np.mean(lon_out))
+                              / (2.0 * math.pi)) * 2.0 * math.pi
+    return _project(lat_out, lon_out, projection)
 
 
 # ---------------------------------------------------------------------------
@@ -627,7 +650,8 @@ def _overlap_area(a, b, margin=_LABEL_MARGIN):
 
 
 def plot_sites(ax, sites, view_lat_deg, view_lon_deg,
-               projection="orthographic", auto_labels=True):
+               projection="orthographic", auto_labels=True,
+               avoid_texts=None):
     """Draw Site markers (and their labels) on an existing map axes.
 
     Sites on the hidden hemisphere of an orthographic map are skipped.
@@ -636,12 +660,17 @@ def plot_sites(ax, sites, view_lat_deg, view_lon_deg,
     pin a ``label_offset`` are placed by a deterministic declutter pass:
     each label tries 8 compass positions on rings of 5/24/38 pt (in
     input order, upper-right preferred) and takes the first spot clear
-    of every symbol, every pinned label, and every label already placed
-    — falling back to the least-overlapping candidate when the field is
-    too crowded.  Leader lines appear automatically for placements
-    beyond the 12 pt threshold.  Pinned labels are never moved.  Call
-    this after the map (and the axes limits) are drawn, so screen
-    geometry is final.
+    of every symbol, every pinned label, every label already placed, and
+    every ``avoid_texts`` MapText — falling back to the least-
+    overlapping candidate when the field is too crowded.  Leader lines
+    appear automatically for placements beyond the 12 pt threshold.
+    Pinned labels are never moved (they override the pass — and may
+    therefore overprint anything).  Call this after the map (and the
+    axes limits) are drawn, so screen geometry is final.
+
+    avoid_texts : iterable of MapText the declutter must route around
+        (``globe`` passes its ``texts``); they are obstacles only, drawn
+        separately by plot_texts.
 
     With ``auto_labels=False`` every label uses its pinned offset, or
     the 4 pt upper-right fallback.  Returns the list of sites drawn.
@@ -669,6 +698,18 @@ def plot_sites(ax, sites, view_lat_deg, view_lon_deg,
         anchors.append((px, py))
         half = site.size / 2.0 + 1.0
         obstacles.append((px - half, py - half, px + half, py + half))
+
+    # free-standing MapTexts are obstacles for the auto placement
+    # (appended after the symbol boxes, so own-symbol indexing holds)
+    for note in avoid_texts or ():
+        x, y, vis = map_coordinates(note.lat_deg, note.lon_deg,
+                                    view_lat_deg, view_lon_deg, projection)
+        if not vis:
+            continue
+        px, py = ax.transData.transform((x, y)) * scale
+        w, h = _text_extent_points(ax, note.text, note.size)
+        obstacles.append(_anchor_rect(px, py, (0.0, 0.0), w, h,
+                                      note.ha, note.va))
 
     labeled = [(i, site) for i, (site, _, _) in enumerate(visible)
                if site.label]
@@ -1094,8 +1135,11 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
     poly = night_polygon(view_lat, view_lon, anti_lat, anti_lon,
                          horizon_angle, projection)
     if len(poly):
-        ax.fill(poly[:, 0], poly[:, 1], facecolor=(shadow_gray,) * 3,
-                edgecolor="none", zorder=1)
+        shifts = (0.0,) if projection == "orthographic" \
+            else (-2.0 * math.pi, 0.0, 2.0 * math.pi)
+        for s in shifts:   # cylindrical night region tiles mod 2*pi
+            ax.fill(poly[:, 0] + s, poly[:, 1],
+                    facecolor=(shadow_gray,) * 3, edgecolor="none", zorder=1)
     for line in coastline_outlines(view_lat, view_lon, projection):
         ax.plot(line[:, 0], line[:, 1], color="black", linewidth=0.5,
                 zorder=2)
@@ -1145,7 +1189,7 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
     # declutter pass measures real screen geometry
     if sites:
         plot_sites(ax, sites, view_lat, view_lon, projection,
-                   auto_labels=auto_labels)
+                   auto_labels=auto_labels, avoid_texts=texts)
     if texts:
         plot_texts(ax, texts, view_lat, view_lon, projection)
     ax.set_axis_off()
