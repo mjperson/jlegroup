@@ -558,6 +558,31 @@ def test_plot_sites_hidden_hemisphere_skipped():
     plt.close(fig)
 
 
+def test_site_leader_lines():
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    # auto: small offset -> no leader; large offset -> leader
+    assert not sm.Site(0, 0, label="a").wants_leader()
+    assert sm.Site(0, 0, label="a", label_offset=(-30.0, 18.0)).wants_leader()
+    # explicit override wins in both directions
+    assert sm.Site(0, 0, label="a", leader=True).wants_leader()
+    assert not sm.Site(0, 0, label="a", label_offset=(40.0, 0.0),
+                       leader=False).wants_leader()
+
+    fig, ax = plt.subplots()
+    sm.plot_sites(ax, [
+        sm.Site(42.36, -71.09, label="near"),                       # no leader
+        sm.Site(45.42, -75.70, label="pushed",
+                label_offset=(30.0, 20.0)),                         # leader
+    ], 42.36, -71.09)
+    arrows = [t for t in ax.texts if getattr(t, "arrow_patch", None)]
+    assert len(ax.texts) == 2
+    assert len(arrows) == 1
+    plt.close(fig)
+
+
 def test_globe_with_sites_and_texts(tmp_path):
     import matplotlib
     matplotlib.use("Agg", force=True)

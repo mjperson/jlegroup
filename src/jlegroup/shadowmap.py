@@ -511,9 +511,14 @@ class Site:
     label : optional text drawn beside the symbol.
     label_size : label font size, points.
     label_offset : (dx, dy) label offset from the symbol, in points;
-        with the default ha/va the label sits to the upper right.
+        with the default ha/va the label sits to the upper right.  In a
+        crowded field, push the label well clear (20-40 pt) and let the
+        leader line connect it back to its symbol.
     label_ha, label_va : label anchoring (matplotlib ha/va), so labels
         can be flipped to any side of the symbol to avoid collisions.
+    leader : draw a thin line connecting a pushed-out label back to its
+        symbol.  None (default) = automatic: a leader appears when the
+        label offset exceeds 12 pt; True/False force it on/off.
     """
 
     lat_deg: float
@@ -527,6 +532,16 @@ class Site:
     label_offset: tuple = (4.0, 4.0)
     label_ha: str = "left"
     label_va: str = "bottom"
+    leader: bool | None = None
+
+    #: offset length (points) beyond which leader=None draws a leader.
+    LEADER_AUTO_THRESHOLD = 12.0
+
+    def wants_leader(self):
+        """Whether this site's label gets a leader line."""
+        if self.leader is not None:
+            return self.leader
+        return math.hypot(*self.label_offset) > self.LEADER_AUTO_THRESHOLD
 
 
 @dataclass(frozen=True)
@@ -566,10 +581,16 @@ def plot_sites(ax, sites, view_lat_deg, view_lon_deg,
                 markerfacecolor=site.color if site.filled else "none",
                 markeredgecolor=site.color, zorder=6)
         if site.label:
+            arrowprops = None
+            if site.wants_leader():
+                # plain thin line, stopped short of the marker edge
+                arrowprops = dict(arrowstyle="-", linewidth=0.6,
+                                  color=site.color, shrinkA=2.0,
+                                  shrinkB=site.size / 2.0 + 1.5, zorder=6)
             ax.annotate(site.label, (x, y), textcoords="offset points",
                         xytext=site.label_offset, fontsize=site.label_size,
                         color=site.color, ha=site.label_ha, va=site.label_va,
-                        zorder=7)
+                        arrowprops=arrowprops, zorder=7)
         drawn.append(site)
     return drawn
 
