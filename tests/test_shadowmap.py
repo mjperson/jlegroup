@@ -837,6 +837,40 @@ def test_land_fill_containment_truth(proj):
     close()
 
 
+def test_land_fill_limb_lune():
+    # Regression (review of 04a7842): Sutherland-Hodgman alone chords
+    # each hidden span across the limb, losing the lune — central
+    # Australia at d = 84 deg from a (20 N, 60 E) view rendered as
+    # water.  With limb-arc closure it must render as land.
+    is_land, close = _land_pixel_sampler(20.0, 60.0, "orthographic")
+    assert is_land(-25.0, 133.0)              # visible, 6 deg inside limb
+    assert is_land(-30.0, 25.0)               # South Africa, mid-disk
+    assert not is_land(-40.0, 95.0)           # south Indian Ocean
+    close()
+
+
+def test_land_fill_limb_arcs_are_sampled():
+    # Render-free structure: wherever the clipped outline runs along the
+    # limb (r ~ 1), consecutive vertices must subtend <~ 2 deg — long
+    # chords between crossings mean the arc insertion is broken.
+    for view_lat, view_lon in [(20.0, 60.0), (-30.0, -60.0),
+                               (42.36, -71.09)]:
+        for rings in sm.land_polygons():
+            for is_hole, ring in rings:
+                latp, lonp = sm.view_rotation(ring[:, 0], ring[:, 1],
+                                              view_lat, view_lon)
+                for xy in sm._fill_ring_xy(latp, lonp, "orthographic",
+                                           ring_ccw=sm._ring_is_ccw(ring)):
+                    r = np.hypot(xy[:, 0], xy[:, 1])
+                    th = np.arctan2(xy[:, 1], xy[:, 0])
+                    nxt = np.roll(np.arange(len(xy)), -1)
+                    both = (r > 1.0 - 1e-3) & (r[nxt] > 1.0 - 1e-3)
+                    dth = np.abs((th[nxt] - th + math.pi)
+                                 % (2.0 * math.pi) - math.pi)
+                    assert np.all(dth[both] < math.radians(2.5)), \
+                        (view_lat, view_lon)
+
+
 def test_land_fill_orthographic_hole_near_center():
     # Caspian-centered view: the hole must render as sea on the disk.
     is_land, close = _land_pixel_sampler(45.0, 50.0, "orthographic")

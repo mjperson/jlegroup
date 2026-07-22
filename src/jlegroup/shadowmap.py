@@ -61,10 +61,10 @@ direction, 2026-07-14).  Concretely:
   polylines instead).  For the optional land/ocean fills, the fillable
   companion layer Natural Earth 1:110m "Land" (127 polygon features,
   128 rings including the Caspian hole; fetched 2026-07-22) is bundled
-  as ``jlegroup/data/ne_110m_land.npz``; fills are clipped exactly to
-  the visible hemisphere (convex half-space Sutherland-Hodgman) on the
-  orthographic map and closed/tiled like the night region on
-  cylindrical maps.
+  as ``jlegroup/data/ne_110m_land.npz``; fills are clipped to the
+  visible hemisphere (convex half-space Sutherland-Hodgman, hidden
+  spans closed along ~1-deg-sampled limb arcs) on the orthographic map
+  and closed/tiled like the night region on cylindrical maps.
 
 * **Geometry engine: ported and corrected.**  The view rotation,
   orthographic/mercator/equirectangular projections, night-cap
@@ -427,18 +427,22 @@ def _ring_is_ccw(ring):
 
 
 def _fill_ring_xy(latp, lonp, projection, ring_ccw=True):
-    """A closed view-frame ring -> map xy for FILLING, or None if the
-    ring contributes nothing.
+    """A closed view-frame ring -> a LIST of map-xy loops for FILLING
+    (empty if the ring contributes nothing).
 
-    Orthographic: the ring is clipped exactly against the visible
-    half-space z >= 0 in the rotated Cartesian frame (Sutherland-
-    Hodgman; the half-space is convex, and edge crossings land on the
-    limb to within the chord sagitta of the ~1 deg vertex spacing) —
-    fully hidden rings drop out, and ring orientation (which carries
-    the hole information) is preserved.  Cylindrical: the ring is
-    unwrapped in view longitude; a ring enclosing a view-frame pole
-    (closure ±2*pi) is closed along that pole's map edge — the same
-    treatment as the night cap.
+    Orthographic: proper clipping against the visible hemisphere.  The
+    ring's visible chains (entry crossing -> visible vertices -> exit
+    crossing, crossings normalized onto the limb circle) are stitched
+    Weiler-Atherton style: from each chain's exit, the boundary follows
+    the LIMB ARC (~1 deg sampling) in the ring's winding direction to
+    the nearest entry crossing along the limb — which may belong to a
+    different chain, so a partially hidden ring can merge chains into
+    one loop or split into several disjoint visible loops.  This keeps
+    fills flush with the limb (no chords across hidden spans) and
+    preserves ring orientation, which carries the hole information.
+    Cylindrical: the ring is unwrapped in view longitude; a ring
+    enclosing a view-frame pole (closure ±2*pi) is closed along that
+    pole's map edge — the same treatment as the night cap.
     """
     if projection == "orthographic":
         pts = np.column_stack([np.cos(latp) * np.sin(lonp),
@@ -446,20 +450,68 @@ def _fill_ring_xy(latp, lonp, projection, ring_ccw=True):
                                np.cos(latp) * np.cos(lonp)])
         if np.allclose(pts[0], pts[-1]):
             pts = pts[:-1]                    # GeoJSON rings repeat the start
-        out = []
         n = len(pts)
-        for i in range(n):
-            a, b = pts[i], pts[(i + 1) % n]
-            a_in, b_in = a[2] >= 0.0, b[2] >= 0.0
-            if a_in:
-                out.append(a)
-            if a_in != b_in:
-                t = a[2] / (a[2] - b[2])
-                out.append(a + t * (b - a))
-        if len(out) < 3:
-            return None
-        out = np.asarray(out)
-        return out[:, :2]
+        vis = pts[:, 2] >= 0.0
+        if vis.all():
+            return [pts[:, :2]]
+        if not vis.any():
+            return []
+
+        def _crossing(i_hidden, i_visible):
+            a, b = pts[i_hidden], pts[i_visible]
+            t = a[2] / (a[2] - b[2])
+            c = (a + t * (b - a))[:2]
+            r = math.hypot(c[0], c[1])
+            return c / r if r > 0.0 else c
+
+        # visible chains: entry crossing, visible run, exit crossing
+        starts = np.nonzero(vis & ~np.roll(vis, 1))[0]
+        chains = []
+        for s in starts:
+            entry = _crossing((s - 1) % n, s)
+            run = [entry]
+            i = int(s)
+            while vis[i]:
+                run.append(pts[i, :2])
+                i = (i + 1) % n
+            exit_ = _crossing(i, (i - 1) % n)
+            run.append(exit_)
+            chains.append((run,
+                           math.atan2(entry[1], entry[0]),
+                           math.atan2(exit_[1], exit_[0])))
+
+        # stitch: from each exit, walk the limb in the ring's direction
+        # to the nearest entry along the limb (alternation on the limb
+        # guarantees it is an entry), inserting ~1 deg arc points
+        d = 1.0 if ring_ccw else -1.0
+        two_pi = 2.0 * math.pi
+        step = math.radians(1.0)
+        loops = []
+        remaining = set(range(len(chains)))
+        while remaining:
+            start = remaining.pop()
+            loop_pts = list(chains[start][0])
+            cur = start
+            while True:
+                exit_ang = chains[cur][2]
+                candidates = list(remaining) + [start]
+                best, best_gap = None, None
+                for j in candidates:
+                    gap = (d * (chains[j][1] - exit_ang)) % two_pi
+                    if best is None or gap < best_gap:
+                        best, best_gap = j, gap
+                k = int(best_gap / step)
+                for q in range(1, k):
+                    th = exit_ang + d * best_gap * q / k
+                    loop_pts.append(np.array([math.cos(th), math.sin(th)]))
+                if best == start:
+                    break
+                remaining.discard(best)
+                loop_pts.extend(chains[best][0])
+                cur = best
+            if len(loop_pts) >= 3:
+                loops.append(np.asarray(loop_pts))
+        return loops
     lonu = np.unwrap(lonp)
     lat_out, lon_out = latp, lonu
     closure = lonu[-1] - lonu[0]
@@ -477,7 +529,7 @@ def _fill_ring_xy(latp, lonp, projection, ring_ccw=True):
         lon_out = np.concatenate([lonu, [lonu[-1], lonu[0]]])
     lon_out = lon_out - round(float(np.mean(lon_out))
                               / (2.0 * math.pi)) * 2.0 * math.pi
-    return _project(lat_out, lon_out, projection)
+    return [_project(lat_out, lon_out, projection)]
 
 
 def plot_land(ax, view_lat_deg, view_lon_deg, projection="orthographic",
@@ -504,16 +556,17 @@ def plot_land(ax, view_lat_deg, view_lon_deg, projection="orthographic",
         for is_hole, ring in rings:
             latp, lonp = view_rotation(ring[:, 0], ring[:, 1],
                                        view_lat_deg, view_lon_deg)
-            xy = _fill_ring_xy(latp, lonp, projection,
-                               ring_ccw=_ring_is_ccw(ring))
-            if xy is None or len(xy) < 3:
-                continue
-            for s in shifts:
-                shifted = xy if s == 0.0 else xy + np.array([s, 0.0])
-                verts.append(np.vstack([shifted, shifted[:1]]))
-                codes.append(np.concatenate(
-                    [[Path.MOVETO], np.full(len(shifted) - 1, Path.LINETO),
-                     [Path.CLOSEPOLY]]))
+            for xy in _fill_ring_xy(latp, lonp, projection,
+                                    ring_ccw=_ring_is_ccw(ring)):
+                if len(xy) < 3:
+                    continue
+                for s in shifts:
+                    shifted = xy if s == 0.0 else xy + np.array([s, 0.0])
+                    verts.append(np.vstack([shifted, shifted[:1]]))
+                    codes.append(np.concatenate(
+                        [[Path.MOVETO],
+                         np.full(len(shifted) - 1, Path.LINETO),
+                         [Path.CLOSEPOLY]]))
         if not verts:
             continue
         path = Path(np.vstack(verts), np.concatenate(codes))
