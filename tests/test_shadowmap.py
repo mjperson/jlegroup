@@ -756,6 +756,149 @@ def test_globe_with_sites_and_texts(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Land fill
+# ---------------------------------------------------------------------------
+
+
+def test_land_polygons_pins():
+    feats = sm.land_polygons()
+    assert len(feats) == 127
+    rings = [r for f in feats for r in f]
+    assert len(rings) == 128
+    assert sum(1 for is_hole, _ in rings if is_hole) == 1   # the Caspian
+    total = sum(len(r) for _, r in rings)
+    assert total == 5143
+    alldeg = np.degrees(np.vstack([r for _, r in rings]))
+    assert alldeg[:, 0].min() == pytest.approx(-90.0, abs=1e-6)
+    assert float(np.abs(alldeg).sum()) == pytest.approx(667770.998, abs=0.01)
+
+
+def _land_pixel_sampler(view_lat, view_lon, proj):
+    """Render ONLY the land fill (black on white) and return a sampler
+    (lat, lon) -> bool.  Pixel truth: matplotlib's Path.contains_point
+    ignores holes in compound paths (union-like behavior), so tests
+    must sample what Agg actually renders."""
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(8.0, 8.0), dpi=100)
+    sm.plot_land(ax, view_lat, view_lon, proj, color="black")
+    if proj == "orthographic":
+        ax.set_xlim(-1.1, 1.1)
+        ax.set_ylim(-1.1, 1.1)
+    else:
+        ax.set_xlim(-math.pi, math.pi)
+        ax.set_ylim((-3.0, 3.0) if proj == "mercator"
+                    else (-math.pi / 2.0, math.pi / 2.0))
+    ax.set_axis_off()
+    fig.canvas.draw()
+    buf = np.asarray(fig.canvas.buffer_rgba()).copy()
+    height = buf.shape[0]
+
+    def is_land(lat, lon):
+        x, y, vis = sm.map_coordinates(lat, lon, view_lat, view_lon, proj)
+        if not vis:
+            return None
+        px, py = ax.transData.transform((x, y))
+        return buf[height - 1 - int(round(py)), int(round(px)), 0] < 128
+
+    def close():
+        plt.close(fig)
+
+    return is_land, close
+
+
+@pytest.mark.parametrize("proj", sm.PROJECTIONS)
+def test_land_fill_containment_truth(proj):
+    is_land, close = _land_pixel_sampler(42.36, -71.09, proj)
+    cases = [
+        (39.0, -98.0, True),      # Kansas
+        (23.0, 13.0, True),       # Sahara
+        (-14.0, -130.0, False),   # South Pacific
+        (42.0, 51.0, False),      # Caspian Sea: the hole must stay sea
+        (64.0, 26.0, True),       # Finland
+        (0.0, -30.0, False),      # equatorial Atlantic
+    ]
+    for lat, lon, want in cases:
+        if proj == "orthographic":
+            # skip strongly foreshortened points: within ~20 deg of the
+            # limb a feature narrows below pixel scale (the Caspian at
+            # 81 deg from center renders ~1.5 px wide)
+            cosd = (math.sin(math.radians(lat)) * math.sin(math.radians(42.36))
+                    + math.cos(math.radians(lat)) * math.cos(math.radians(42.36))
+                    * math.cos(math.radians(lon + 71.09)))
+            if math.degrees(math.acos(max(-1.0, min(1.0, cosd)))) > 70.0:
+                continue
+        got = is_land(lat, lon)
+        if got is None:
+            continue                      # hidden on the orthographic map
+        assert got == want, (proj, lat, lon)
+    close()
+
+
+def test_land_fill_orthographic_hole_near_center():
+    # Caspian-centered view: the hole must render as sea on the disk.
+    is_land, close = _land_pixel_sampler(45.0, 50.0, "orthographic")
+    assert is_land(42.0, 51.0) is not None and not is_land(42.0, 51.0)
+    assert is_land(48.0, 68.0)            # Kazakh steppe east of it
+    assert is_land(28.0, 45.0)            # Arabian peninsula
+    close()
+
+
+def test_land_fill_seam_and_hidden_hemisphere():
+    # Pacific-centered view: Eurasia/Africa straddle the seam on the
+    # cylindrical map and are mostly hidden on the orthographic one.
+    is_land, close = _land_pixel_sampler(0.0, -170.0, "equirectangular")
+    for lat, lon, want in [(48.0, 11.0, True),     # Bavaria, across the seam
+                           (-25.0, 134.0, True),   # Australia
+                           (0.0, -120.0, False)]:  # eastern Pacific
+        assert is_land(lat, lon) == want, (lat, lon)
+    close()
+
+    # Orthographic from the antipode of Kansas: North America hidden,
+    # nothing may fill at the disk center.
+    is_land, close = _land_pixel_sampler(-39.0, 82.0, "orthographic")
+    x = is_land(-39.0, 82.0)               # the visible center point
+    assert x is not None and not x
+    close()
+
+
+def test_globe_default_look_unchanged():
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    # No styling flags: exactly the limb circle and the night patch on
+    # the orthographic map — no land/ocean patches.
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00")
+    assert len(ax.patches) == 2
+    plt.close(ax.figure)
+
+
+def test_globe_styling_layers():
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                  land_color="0.93", ocean_color="white")
+    # limb + night + ocean disk + day-land features + clipped night-land
+    assert len(ax.patches) > 100
+    night_land = [p for p in ax.patches if p.get_zorder() == 1.2]
+    assert len(night_land) > 30
+    assert all(p.get_clip_path() is not None for p in night_land)
+    plt.close(ax.figure)
+
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                  projection="equirectangular", land_color="0.93",
+                  ocean_color="0.99", night_land_color="0.7",
+                  zoom_latlon=(12.0, 62.0, -130.0, -55.0))
+    assert len(ax.patches) > 100
+    plt.close(ax.figure)
+
+
+# ---------------------------------------------------------------------------
 # Zoom windows
 # ---------------------------------------------------------------------------
 

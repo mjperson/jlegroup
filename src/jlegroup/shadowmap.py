@@ -39,15 +39,21 @@ direction, 2026-07-14).  Concretely:
   configuration; with no IERS data (offline, or far-future dates)
   astropy degrades gracefully per ``astropy.utils.iers.conf``.
 
-* **Coastlines: Natural Earth.**  The bundled outline database is the
-  public-domain Natural Earth 1:110m coastline (134 polylines, 5128
-  vertices; naturalearthdata.com, via the nvkelso/natural-earth-vector
-  GitHub repository, fetched 2026-07-14), stored as
-  ``jlegroup/data/ne_110m_coastline.npz`` — replacing the ~2100-vertex
-  hand-digitized database embedded in the Mathematica package.
-  Polylines are properly split at the visible-hemisphere limb and at
-  the view-frame ±180 deg meridian (the original dropped whole
-  polylines instead).
+* **Coastlines and land: Natural Earth.**  The bundled outline database
+  is the public-domain Natural Earth 1:110m coastline (134 polylines,
+  5128 vertices; naturalearthdata.com, via the nvkelso/
+  natural-earth-vector GitHub repository, fetched 2026-07-14), stored
+  as ``jlegroup/data/ne_110m_coastline.npz`` — replacing the
+  ~2100-vertex hand-digitized database embedded in the Mathematica
+  package.  Polylines are properly split at the visible-hemisphere limb
+  and at the view-frame ±180 deg meridian (the original dropped whole
+  polylines instead).  For the optional land/ocean fills, the fillable
+  companion layer Natural Earth 1:110m "Land" (127 polygon features,
+  128 rings including the Caspian hole; fetched 2026-07-22) is bundled
+  as ``jlegroup/data/ne_110m_land.npz``; fills are clipped exactly to
+  the visible hemisphere (convex half-space Sutherland-Hodgman) on the
+  orthographic map and closed/tiled like the night region on
+  cylindrical maps.
 
 * **Geometry engine: ported and corrected.**  The view rotation,
   orthographic/mercator/equirectangular projections, night-cap
@@ -132,6 +138,8 @@ __all__ = [
     "view_rotation_inverse",
     "coastlines",
     "coastline_outlines",
+    "land_polygons",
+    "plot_land",
     "night_polygon",
     "find_direction",
     "opposite_direction",
@@ -362,6 +370,149 @@ def coastline_outlines(view_lat_deg, view_lon_deg, projection="orthographic"):
             if b - a >= 2:
                 out.append(_project(latp[a:b], lonp[a:b], projection))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Land fill (optional; Natural Earth 1:110m land polygons)
+# ---------------------------------------------------------------------------
+
+_land_cache = None
+
+
+def land_polygons():
+    """The bundled land-polygon database: a list of features, each a list
+    of ``(is_hole, ring)`` with ``ring`` an (N, 2) array of (lat, lon)
+    radians (first ring the exterior; the one hole in the dataset is the
+    Caspian Sea).
+
+    Natural Earth 1:110m "Land" (public domain, naturalearthdata.com),
+    bundled as jlegroup/data/ne_110m_land.npz — the fillable companion
+    of the coastline polylines (which are line strings and cannot be
+    filled).  Do not mutate the returned arrays.
+    """
+    global _land_cache
+    if _land_cache is None:
+        ref = resources.files("jlegroup").joinpath("data/ne_110m_land.npz")
+        with ref.open("rb") as f:
+            z = np.load(f)
+            latlon = np.radians(z["latlon_deg"].astype(np.float64))
+            offsets, feature, hole = z["offsets"], z["feature"], z["hole"]
+        feats = {}
+        for k in range(len(feature)):
+            ring = latlon[offsets[k]:offsets[k + 1]]
+            feats.setdefault(int(feature[k]), []).append(
+                (bool(hole[k]), ring))
+        _land_cache = [feats[i] for i in sorted(feats)]
+    return _land_cache
+
+
+def _ring_is_ccw(ring):
+    """Orientation of a (lat, lon) ring by planar signed area (x = lon,
+    y = lat).  Natural Earth land follows the shapefile convention:
+    exteriors clockwise, holes counterclockwise."""
+    x, y = ring[:, 1], ring[:, 0]
+    return float(np.sum(x[:-1] * y[1:] - x[1:] * y[:-1])
+                 + x[-1] * y[0] - x[0] * y[-1]) > 0.0
+
+
+def _fill_ring_xy(latp, lonp, projection, ring_ccw=True):
+    """A closed view-frame ring -> map xy for FILLING, or None if the
+    ring contributes nothing.
+
+    Orthographic: the ring is clipped exactly against the visible
+    half-space z >= 0 in the rotated Cartesian frame (Sutherland-
+    Hodgman; the half-space is convex, and edge crossings land on the
+    limb to within the chord sagitta of the ~1 deg vertex spacing) —
+    fully hidden rings drop out, and ring orientation (which carries
+    the hole information) is preserved.  Cylindrical: the ring is
+    unwrapped in view longitude; a ring enclosing a view-frame pole
+    (closure ±2*pi) is closed along that pole's map edge — the same
+    treatment as the night cap.
+    """
+    if projection == "orthographic":
+        pts = np.column_stack([np.cos(latp) * np.sin(lonp),
+                               np.sin(latp),
+                               np.cos(latp) * np.cos(lonp)])
+        if np.allclose(pts[0], pts[-1]):
+            pts = pts[:-1]                    # GeoJSON rings repeat the start
+        out = []
+        n = len(pts)
+        for i in range(n):
+            a, b = pts[i], pts[(i + 1) % n]
+            a_in, b_in = a[2] >= 0.0, b[2] >= 0.0
+            if a_in:
+                out.append(a)
+            if a_in != b_in:
+                t = a[2] / (a[2] - b[2])
+                out.append(a + t * (b - a))
+        if len(out) < 3:
+            return None
+        out = np.asarray(out)
+        return out[:, :2]
+    lonu = np.unwrap(lonp)
+    lat_out, lon_out = latp, lonu
+    closure = lonu[-1] - lonu[0]
+    if abs(closure) > math.pi:
+        # The ring winds around the view axis: it encloses exactly one
+        # view-frame pole.  Which one follows from the interior side
+        # (left of travel for CCW rings, right for CW) combined with
+        # the winding direction: net-east with interior-left (CCW)
+        # encloses the north pole, etc.
+        pole_sign = math.copysign(1.0, closure) * (1.0 if ring_ccw else -1.0)
+        pole_lat = pole_sign * (math.pi / 2.0
+                                if projection == "equirectangular"
+                                else math.pi / 2.0 - 1e-3)
+        lat_out = np.concatenate([latp, [pole_lat, pole_lat]])
+        lon_out = np.concatenate([lonu, [lonu[-1], lonu[0]]])
+    lon_out = lon_out - round(float(np.mean(lon_out))
+                              / (2.0 * math.pi)) * 2.0 * math.pi
+    return _project(lat_out, lon_out, projection)
+
+
+def plot_land(ax, view_lat_deg, view_lon_deg, projection="orthographic",
+              color="0.94", zorder=0.6, clip_patch=None):
+    """Fill the land masses on an existing map axes; returns the patches.
+
+    One compound patch per Natural Earth feature (exterior ring plus
+    holes, so the Caspian stays sea-colored).  On cylindrical maps the
+    fill is tiled at x and x ± 2*pi like the night region.  Pass a
+    ``clip_patch`` (e.g. the night patch ``globe`` draws) to restrict
+    the fill to that region — the night-side land tone is drawn exactly
+    this way.
+    """
+    from matplotlib.patches import PathPatch
+    from matplotlib.path import Path
+
+    _check_projection(projection)
+    shifts = (0.0,) if projection == "orthographic" \
+        else (-2.0 * math.pi, 0.0, 2.0 * math.pi)
+    patches = []
+    for rings in land_polygons():
+        verts = []
+        codes = []
+        for is_hole, ring in rings:
+            latp, lonp = view_rotation(ring[:, 0], ring[:, 1],
+                                       view_lat_deg, view_lon_deg)
+            xy = _fill_ring_xy(latp, lonp, projection,
+                               ring_ccw=_ring_is_ccw(ring))
+            if xy is None or len(xy) < 3:
+                continue
+            for s in shifts:
+                shifted = xy if s == 0.0 else xy + np.array([s, 0.0])
+                verts.append(np.vstack([shifted, shifted[:1]]))
+                codes.append(np.concatenate(
+                    [[Path.MOVETO], np.full(len(shifted) - 1, Path.LINETO),
+                     [Path.CLOSEPOLY]]))
+        if not verts:
+            continue
+        path = Path(np.vstack(verts), np.concatenate(codes))
+        patch = PathPatch(path, facecolor=color, edgecolor="none",
+                          zorder=zorder)
+        ax.add_patch(patch)
+        if clip_patch is not None:
+            patch.set_clip_path(clip_patch)
+        patches.append(patch)
+    return patches
 
 
 # ---------------------------------------------------------------------------
@@ -1166,7 +1317,8 @@ def offset_prediction(ra, dec, ra_offset, dec_offset, b_arcsec, pa_deg,
 
 
 def globe(star, time, projection="orthographic", horizon_angle=0.0,
-          shadow_gray=0.8, tracks=False, dist=0.0, pa=0.0, radius=0.0,
+          shadow_gray=0.8, land_color=None, ocean_color=None,
+          night_land_color=None, tracks=False, dist=0.0, pa=0.0, radius=0.0,
           pred_error=0.0, sites=None, texts=None, auto_labels=True,
           zoom_latlon=None, zoom_xy=None,
           print_diagnostic=False, ax=None, plot_label=None):
@@ -1183,6 +1335,14 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
         for a point to be shaded (0 = terminator; 18 = astronomical
         dark; add ~0.57 for refraction if wanted).
     shadow_gray : night-side gray level, 0 black to 1 white.
+    land_color, ocean_color, night_land_color : optional styling — the
+        default (all None) is the clean outline map.  ``land_color``
+        fills the Natural Earth land polygons; ``ocean_color`` fills the
+        water (the disk on the orthographic map, the whole frame on
+        cylindrical ones); with a land fill, the night-side land is
+        drawn in ``night_land_color`` (default: land blended 50/50
+        toward the shadow tone, so land/ocean contrast survives into
+        the night) — any matplotlib colors.
     tracks, dist, pa, radius, pred_error : draw the shadow-track band
         (see shadow_tracks).  On the orthographic map these are the
         straight fundamental-plane lines; on mercator/equirectangular
@@ -1222,17 +1382,50 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
     view_lat, view_lon = substar_point(coord, t)
     anti_lat, anti_lon = antisolar_point(t)
 
+    from matplotlib.colors import to_rgb
+    from matplotlib.patches import PathPatch
+    from matplotlib.path import Path
+
     if ax is None:
         _, ax = plt.subplots(figsize=(6.0, 6.0))
 
+    shifts = (0.0,) if projection == "orthographic" \
+        else (-2.0 * math.pi, 0.0, 2.0 * math.pi)
+    if ocean_color is not None:
+        if projection == "orthographic":
+            ax.add_patch(plt.Circle((0.0, 0.0), 1.0, facecolor=ocean_color,
+                                    edgecolor="none", zorder=0.3))
+        else:
+            ax.add_patch(plt.Rectangle((-7.0, -10.0), 14.0, 20.0,
+                                       facecolor=ocean_color,
+                                       edgecolor="none", zorder=0.3))
+    if land_color is not None:
+        plot_land(ax, view_lat, view_lon, projection, color=land_color,
+                  zorder=0.6)
+
     poly = night_polygon(view_lat, view_lon, anti_lat, anti_lon,
                          horizon_angle, projection)
+    night_patch = None
     if len(poly):
-        shifts = (0.0,) if projection == "orthographic" \
-            else (-2.0 * math.pi, 0.0, 2.0 * math.pi)
+        verts = []
+        codes = []
         for s in shifts:   # cylindrical night region tiles mod 2*pi
-            ax.fill(poly[:, 0] + s, poly[:, 1],
-                    facecolor=(shadow_gray,) * 3, edgecolor="none", zorder=1)
+            shifted = poly if s == 0.0 else poly + np.array([s, 0.0])
+            verts.append(np.vstack([shifted, shifted[:1]]))
+            codes.append(np.concatenate(
+                [[Path.MOVETO], np.full(len(shifted) - 1, Path.LINETO),
+                 [Path.CLOSEPOLY]]))
+        night_patch = PathPatch(Path(np.vstack(verts), np.concatenate(codes)),
+                                facecolor=(shadow_gray,) * 3,
+                                edgecolor="none", zorder=1)
+        ax.add_patch(night_patch)
+        if land_color is not None:
+            nl = night_land_color
+            if nl is None:
+                nl = tuple(0.5 * (a + b) for a, b in
+                           zip(to_rgb(land_color), (shadow_gray,) * 3))
+            plot_land(ax, view_lat, view_lon, projection, color=nl,
+                      zorder=1.2, clip_patch=night_patch)
     for line in coastline_outlines(view_lat, view_lon, projection):
         ax.plot(line[:, 0], line[:, 1], color="black", linewidth=0.5,
                 zorder=2)
