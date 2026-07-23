@@ -7,6 +7,29 @@ the recorded version-bump commits; from v0.9.0 onward, tagging happens at releas
 Version scheme: `0.N.0` during development; `1.0.0` (2026-07-18) is the first
 public release.
 
+## [Unreleased]
+
+- **shadowmap annotation, zoom, and styling layer** (newly written; no
+  Mathematica counterpart) — all opt-in, the bare-globe default verified
+  pixel-identical to v1.0.0: `Site`/`plot_sites` (markers + labels with a
+  deterministic declutter pass, pinning override, automatic leader lines),
+  `MapText`/`plot_texts`, `globe(zoom_latlon=…)` / `zoom_xy` zoom windows
+  (dateline-crossing supported; `map_coordinates`/`map_window` exposed as the
+  placement engines), Natural Earth land/ocean fills with night-side tones
+  (`land_color`/`ocean_color`/`night_land_color`; new bundled
+  `data/ne_110m_land.npz`, public domain, incl. the Caspian hole), and graded
+  `twilight=` sun-depression bands. Orthographic land fills are clipped to
+  the visible hemisphere with Weiler–Atherton stitching along ~1°-sampled
+  limb arcs (a review round replaced straight-chord closure, which bit up to
+  ~0.2 Earth radii out of limb-crossing continents).
+- **Fixed (from v1.0.0): cylindrical night fills.** Seam-crossing night caps
+  previously chorded across mercator/equirectangular maps — for a star near
+  the sun's RA the drawn night region was wrong essentially everywhere
+  (differentially measured: 100% of clear-margin points misclassified);
+  night regions now unwrap in continuous view longitude, close along the
+  enclosed pole's map edge, and tile mod 2π. Pole-enclosing fill rings derive
+  their closure pole from ring orientation × winding.
+
 ## [1.0.0] — 2026-07-18 — First public release
 
 - The repository is **public** and the package is on **PyPI**: `pip install
