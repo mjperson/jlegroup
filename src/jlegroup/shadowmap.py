@@ -23,6 +23,17 @@ view-frame coordinates are also provided.  Function mapping:
     dist_from_impact_parameter  smDist
     offset_prediction           smOffset
 
+New annotation and styling layer (no Mathematica counterpart; defaults
+keep the clean bulk-production map — everything below is opt-in):
+``Site``/``plot_sites`` — marker symbols with labels placed by lat/lon,
+automatic label decluttering with per-site pinning override and leader
+lines; ``MapText``/``plot_texts`` — free text by lat/lon, treated as
+obstacles by the declutter pass; ``map_coordinates``/``map_window`` —
+the placement and zoom engines (``globe(zoom_latlon=..., zoom_xy=...)``);
+``land_polygons``/``plot_land`` and ``globe(land_color=, ocean_color=,
+night_land_color=)`` — Natural Earth land fills with night-side tones;
+``globe(twilight=...)`` — graded sun-depression bands.
+
 Design: superior implementations preferred over porting (maintainer
 direction, 2026-07-14).  Concretely:
 
@@ -39,15 +50,21 @@ direction, 2026-07-14).  Concretely:
   configuration; with no IERS data (offline, or far-future dates)
   astropy degrades gracefully per ``astropy.utils.iers.conf``.
 
-* **Coastlines: Natural Earth.**  The bundled outline database is the
-  public-domain Natural Earth 1:110m coastline (134 polylines, 5128
-  vertices; naturalearthdata.com, via the nvkelso/natural-earth-vector
-  GitHub repository, fetched 2026-07-14), stored as
-  ``jlegroup/data/ne_110m_coastline.npz`` — replacing the ~2100-vertex
-  hand-digitized database embedded in the Mathematica package.
-  Polylines are properly split at the visible-hemisphere limb and at
-  the view-frame ±180 deg meridian (the original dropped whole
-  polylines instead).
+* **Coastlines and land: Natural Earth.**  The bundled outline database
+  is the public-domain Natural Earth 1:110m coastline (134 polylines,
+  5128 vertices; naturalearthdata.com, via the nvkelso/
+  natural-earth-vector GitHub repository, fetched 2026-07-14), stored
+  as ``jlegroup/data/ne_110m_coastline.npz`` — replacing the
+  ~2100-vertex hand-digitized database embedded in the Mathematica
+  package.  Polylines are properly split at the visible-hemisphere limb
+  and at the view-frame ±180 deg meridian (the original dropped whole
+  polylines instead).  For the optional land/ocean fills, the fillable
+  companion layer Natural Earth 1:110m "Land" (127 polygon features,
+  128 rings including the Caspian hole; fetched 2026-07-22) is bundled
+  as ``jlegroup/data/ne_110m_land.npz``; fills are clipped to the
+  visible hemisphere (convex half-space Sutherland-Hodgman, hidden
+  spans closed along ~1-deg-sampled limb arcs) on the orthographic map
+  and closed/tiled like the night region on cylindrical maps.
 
 * **Geometry engine: ported and corrected.**  The view rotation,
   orthographic/mercator/equirectangular projections, night-cap
@@ -117,6 +134,12 @@ __all__ = [
     "PROJECTIONS",
     "TrackSet",
     "OffsetResult",
+    "Site",
+    "MapText",
+    "map_coordinates",
+    "map_window",
+    "plot_sites",
+    "plot_texts",
     "star_coord",
     "as_time",
     "substar_point",
@@ -126,6 +149,8 @@ __all__ = [
     "view_rotation_inverse",
     "coastlines",
     "coastline_outlines",
+    "land_polygons",
+    "plot_land",
     "night_polygon",
     "find_direction",
     "opposite_direction",
@@ -359,6 +384,202 @@ def coastline_outlines(view_lat_deg, view_lon_deg, projection="orthographic"):
 
 
 # ---------------------------------------------------------------------------
+# Land fill (optional; Natural Earth 1:110m land polygons)
+# ---------------------------------------------------------------------------
+
+_land_cache = None
+
+
+def land_polygons():
+    """The bundled land-polygon database: a list of features, each a list
+    of ``(is_hole, ring)`` with ``ring`` an (N, 2) array of (lat, lon)
+    radians (first ring the exterior; the one hole in the dataset is the
+    Caspian Sea).
+
+    Natural Earth 1:110m "Land" (public domain, naturalearthdata.com),
+    bundled as jlegroup/data/ne_110m_land.npz — the fillable companion
+    of the coastline polylines (which are line strings and cannot be
+    filled).  Do not mutate the returned arrays.
+    """
+    global _land_cache
+    if _land_cache is None:
+        ref = resources.files("jlegroup").joinpath("data/ne_110m_land.npz")
+        with ref.open("rb") as f:
+            z = np.load(f)
+            latlon = np.radians(z["latlon_deg"].astype(np.float64))
+            offsets, feature, hole = z["offsets"], z["feature"], z["hole"]
+        feats = {}
+        for k in range(len(feature)):
+            ring = latlon[offsets[k]:offsets[k + 1]]
+            feats.setdefault(int(feature[k]), []).append(
+                (bool(hole[k]), ring))
+        _land_cache = [feats[i] for i in sorted(feats)]
+    return _land_cache
+
+
+def _ring_is_ccw(ring):
+    """Orientation of a (lat, lon) ring by planar signed area (x = lon,
+    y = lat).  Natural Earth land follows the shapefile convention:
+    exteriors clockwise, holes counterclockwise."""
+    x, y = ring[:, 1], ring[:, 0]
+    return float(np.sum(x[:-1] * y[1:] - x[1:] * y[:-1])
+                 + x[-1] * y[0] - x[0] * y[-1]) > 0.0
+
+
+def _fill_ring_xy(latp, lonp, projection, ring_ccw=True):
+    """A closed view-frame ring -> a LIST of map-xy loops for FILLING
+    (empty if the ring contributes nothing).
+
+    Orthographic: proper clipping against the visible hemisphere.  The
+    ring's visible chains (entry crossing -> visible vertices -> exit
+    crossing, crossings normalized onto the limb circle) are stitched
+    Weiler-Atherton style: from each chain's exit, the boundary follows
+    the LIMB ARC (~1 deg sampling) in the ring's winding direction to
+    the nearest entry crossing along the limb — which may belong to a
+    different chain, so a partially hidden ring can merge chains into
+    one loop or split into several disjoint visible loops.  This keeps
+    fills flush with the limb (no chords across hidden spans) and
+    preserves ring orientation, which carries the hole information.
+    Cylindrical: the ring is unwrapped in view longitude; a ring
+    enclosing a view-frame pole (closure ±2*pi) is closed along that
+    pole's map edge — the same treatment as the night cap.
+    """
+    if projection == "orthographic":
+        pts = np.column_stack([np.cos(latp) * np.sin(lonp),
+                               np.sin(latp),
+                               np.cos(latp) * np.cos(lonp)])
+        if np.allclose(pts[0], pts[-1]):
+            pts = pts[:-1]                    # GeoJSON rings repeat the start
+        n = len(pts)
+        vis = pts[:, 2] >= 0.0
+        if vis.all():
+            return [pts[:, :2]]
+        if not vis.any():
+            return []
+
+        def _crossing(i_hidden, i_visible):
+            a, b = pts[i_hidden], pts[i_visible]
+            t = a[2] / (a[2] - b[2])
+            c = (a + t * (b - a))[:2]
+            r = math.hypot(c[0], c[1])
+            return c / r if r > 0.0 else c
+
+        # visible chains: entry crossing, visible run, exit crossing
+        starts = np.nonzero(vis & ~np.roll(vis, 1))[0]
+        chains = []
+        for s in starts:
+            entry = _crossing((s - 1) % n, s)
+            run = [entry]
+            i = int(s)
+            while vis[i]:
+                run.append(pts[i, :2])
+                i = (i + 1) % n
+            exit_ = _crossing(i, (i - 1) % n)
+            run.append(exit_)
+            chains.append((run,
+                           math.atan2(entry[1], entry[0]),
+                           math.atan2(exit_[1], exit_[0])))
+
+        # stitch: from each exit, walk the limb in the ring's direction
+        # to the nearest entry along the limb (alternation on the limb
+        # guarantees it is an entry), inserting ~1 deg arc points
+        d = 1.0 if ring_ccw else -1.0
+        two_pi = 2.0 * math.pi
+        step = math.radians(1.0)
+        loops = []
+        remaining = set(range(len(chains)))
+        while remaining:
+            start = remaining.pop()
+            loop_pts = list(chains[start][0])
+            cur = start
+            while True:
+                exit_ang = chains[cur][2]
+                candidates = list(remaining) + [start]
+                best, best_gap = None, None
+                for j in candidates:
+                    gap = (d * (chains[j][1] - exit_ang)) % two_pi
+                    if best is None or gap < best_gap:
+                        best, best_gap = j, gap
+                k = int(best_gap / step)
+                for q in range(1, k):
+                    th = exit_ang + d * best_gap * q / k
+                    loop_pts.append(np.array([math.cos(th), math.sin(th)]))
+                if best == start:
+                    break
+                remaining.discard(best)
+                loop_pts.extend(chains[best][0])
+                cur = best
+            if len(loop_pts) >= 3:
+                loops.append(np.asarray(loop_pts))
+        return loops
+    lonu = np.unwrap(lonp)
+    lat_out, lon_out = latp, lonu
+    closure = lonu[-1] - lonu[0]
+    if abs(closure) > math.pi:
+        # The ring winds around the view axis: it encloses exactly one
+        # view-frame pole.  Which one follows from the interior side
+        # (left of travel for CCW rings, right for CW) combined with
+        # the winding direction: net-east with interior-left (CCW)
+        # encloses the north pole, etc.
+        pole_sign = math.copysign(1.0, closure) * (1.0 if ring_ccw else -1.0)
+        pole_lat = pole_sign * (math.pi / 2.0
+                                if projection == "equirectangular"
+                                else math.pi / 2.0 - 1e-3)
+        lat_out = np.concatenate([latp, [pole_lat, pole_lat]])
+        lon_out = np.concatenate([lonu, [lonu[-1], lonu[0]]])
+    lon_out = lon_out - round(float(np.mean(lon_out))
+                              / (2.0 * math.pi)) * 2.0 * math.pi
+    return [_project(lat_out, lon_out, projection)]
+
+
+def plot_land(ax, view_lat_deg, view_lon_deg, projection="orthographic",
+              color="0.94", zorder=0.6, clip_patch=None):
+    """Fill the land masses on an existing map axes; returns the patches.
+
+    One compound patch per Natural Earth feature (exterior ring plus
+    holes, so the Caspian stays sea-colored).  On cylindrical maps the
+    fill is tiled at x and x ± 2*pi like the night region.  Pass a
+    ``clip_patch`` (e.g. the night patch ``globe`` draws) to restrict
+    the fill to that region — the night-side land tone is drawn exactly
+    this way.
+    """
+    from matplotlib.patches import PathPatch
+    from matplotlib.path import Path
+
+    _check_projection(projection)
+    shifts = (0.0,) if projection == "orthographic" \
+        else (-2.0 * math.pi, 0.0, 2.0 * math.pi)
+    patches = []
+    for rings in land_polygons():
+        verts = []
+        codes = []
+        for is_hole, ring in rings:
+            latp, lonp = view_rotation(ring[:, 0], ring[:, 1],
+                                       view_lat_deg, view_lon_deg)
+            for xy in _fill_ring_xy(latp, lonp, projection,
+                                    ring_ccw=_ring_is_ccw(ring)):
+                if len(xy) < 3:
+                    continue
+                for s in shifts:
+                    shifted = xy if s == 0.0 else xy + np.array([s, 0.0])
+                    verts.append(np.vstack([shifted, shifted[:1]]))
+                    codes.append(np.concatenate(
+                        [[Path.MOVETO],
+                         np.full(len(shifted) - 1, Path.LINETO),
+                         [Path.CLOSEPOLY]]))
+        if not verts:
+            continue
+        path = Path(np.vstack(verts), np.concatenate(codes))
+        patch = PathPatch(path, facecolor=color, edgecolor="none",
+                          zorder=zorder)
+        ax.add_patch(patch)
+        if clip_patch is not None:
+            patch.set_clip_path(clip_patch)
+        patches.append(patch)
+    return patches
+
+
+# ---------------------------------------------------------------------------
 # Night-side shadow
 # ---------------------------------------------------------------------------
 
@@ -424,9 +645,14 @@ def night_polygon(view_lat_deg, view_lon_deg, antisolar_lat_deg,
 
     The high-level ``globe`` computes the antisolar point with astropy;
     this function is pure spherical geometry (testable in isolation).
-    Cylindrical projections draw the full cap without clipping (as in
-    the original); a cap crossing the ±180 deg view meridian will smear
-    across such maps — prefer the orthographic view in that geometry.
+
+    Cylindrical projections return the night region as a single closed
+    polygon in CONTINUOUS (unwrapped) view longitude: x may extend
+    beyond ±pi, and when the cap encloses a view-frame pole the polygon
+    is closed along that pole's map edge (two extra vertices appended
+    after the 203 boundary points).  The region tiles with period 2*pi
+    in x — draw it at x and x ± 2*pi, as ``globe`` does, and any part
+    beyond the map limits clips away.
     """
     _check_projection(projection)
     vf_lat, vf_lon = view_rotation(math.radians(antisolar_lat_deg),
@@ -453,7 +679,404 @@ def night_polygon(view_lat_deg, view_lon_deg, antisolar_lat_deg,
         if len(clipped) == 0:
             return clipped
         return _project(clipped[:, 0], clipped[:, 1], "orthographic")
-    return _project(latp, lonp, projection)
+    # Cylindrical: unwrap the boundary so the polygon is contiguous even
+    # when the cap crosses the ±pi view meridian.  The closed boundary
+    # comes back to its start (closure ~ 0) unless the cap encloses a
+    # view-frame pole (closure ±2*pi) — then close along that pole's map
+    # edge (clamped short of the pole on the mercator map, whose y
+    # diverges there; the fill clips at the axes limits anyway).
+    lonu = np.unwrap(lonp)
+    lat_out, lon_out = latp, lonu
+    if abs(lonu[-1] - lonu[0]) > math.pi:
+        pole_sign = math.copysign(1.0, vf_lat)
+        pole_lat = pole_sign * (math.pi / 2.0
+                                if projection == "equirectangular"
+                                else math.pi / 2.0 - 1e-3)
+        lat_out = np.concatenate([latp, [pole_lat, pole_lat]])
+        lon_out = np.concatenate([lonu, [lonu[-1], lonu[0]]])
+    # representative copy nearest the principal window
+    lon_out = lon_out - round(float(np.mean(lon_out))
+                              / (2.0 * math.pi)) * 2.0 * math.pi
+    return _project(lat_out, lon_out, projection)
+
+
+# ---------------------------------------------------------------------------
+# Sites and text annotations (Labelling feature, new in this package)
+# ---------------------------------------------------------------------------
+
+
+def map_coordinates(lat_deg, lon_deg, view_lat_deg, view_lon_deg,
+                    projection="orthographic"):
+    """Geographic (lat, lon) [degrees] -> map plot coordinates.
+
+    Returns ``(x, y, visible)``; accepts scalars or arrays (arrays in,
+    arrays out).  For the orthographic map ``visible`` is False for
+    points on the far hemisphere (which project to mirror positions
+    inside the disk — do not draw them); cylindrical projections show
+    the whole Earth, so ``visible`` is always True there.
+
+    This is the placement engine for plot_sites/plot_texts and for any
+    custom annotation a user wants to draw on a shadow map.
+    """
+    _check_projection(projection)
+    scalar = np.isscalar(lat_deg) and np.isscalar(lon_deg)
+    latp, lonp = view_rotation(np.radians(np.asarray(lat_deg, dtype=float)),
+                               np.radians(np.asarray(lon_deg, dtype=float)),
+                               view_lat_deg, view_lon_deg)
+    latp = np.atleast_1d(latp)
+    lonp = np.atleast_1d(lonp)
+    xy = _project(latp, lonp, projection)
+    if projection == "orthographic":
+        visible = np.abs(lonp) < math.pi / 2.0
+    else:
+        visible = np.ones(len(lonp), dtype=bool)
+    if scalar:
+        return float(xy[0, 0]), float(xy[0, 1]), bool(visible[0])
+    return xy[:, 0], xy[:, 1], visible
+
+
+def map_window(lat_min, lat_max, lon_min, lon_max, view_lat_deg, view_lon_deg,
+               projection="orthographic", pad=0.03, n=73):
+    """Map-coordinate bounding box (xmin, xmax, ymin, ymax) of a
+    geographic lat/lon window — the zoom engine.
+
+    The window's image is curved in map coordinates, so its boundary is
+    sampled (``n`` points per edge) and the box padded by ``pad`` (a
+    fraction of each span).  ``lon_min > lon_max`` means the window
+    crosses the ±180 meridian.  A window containing a view-frame pole is
+    rejected on the mercator map (unbounded ordinate) and clamped to the
+    map edge on the equirectangular; on the orthographic map, window
+    parts on the far hemisphere are ignored (entirely-hidden windows
+    are an error).
+
+    Limitation: on cylindrical maps a window straddling the view-frame
+    ±180 deg meridian (the anti-sub-star meridian, far from any track)
+    is boxed correctly but map content is only drawn on the principal
+    side of the seam.
+    """
+    _check_projection(projection)
+    if lat_min >= lat_max:
+        raise ValueError("map_window requires lat_min < lat_max")
+    lon_span = (lon_max - lon_min) % 360.0
+    if lon_span == 0.0:
+        raise ValueError("map_window requires a nonzero longitude span")
+
+    lats = np.linspace(lat_min, lat_max, n)
+    lons = lon_min + np.linspace(0.0, lon_span, n)
+    edge_lat = np.concatenate([np.full(n, lat_min), np.full(n, lat_max),
+                               lats, lats])
+    edge_lon = np.concatenate([lons, lons,
+                               np.full(n, lon_min),
+                               np.full(n, lon_min + lon_span)])
+    xs, ys, vis = map_coordinates(edge_lat, edge_lon,
+                                  view_lat_deg, view_lon_deg, projection)
+
+    # a view-frame pole inside the window bounds the window at the map
+    # edge (equirectangular), blows up (mercator), or adds its own
+    # image point (orthographic)
+    clamp_y = []
+    for sign in (1.0, -1.0):
+        plat, plon = view_rotation_inverse(sign * math.pi / 2.0, 0.0,
+                                           view_lat_deg, view_lon_deg)
+        plat, plon = math.degrees(float(plat)), math.degrees(float(plon))
+        inside = (lat_min <= plat <= lat_max
+                  and (plon - lon_min) % 360.0 <= lon_span)
+        if not inside:
+            continue
+        if projection == "mercator":
+            raise ValueError(
+                "zoom window contains a view-frame pole: the mercator "
+                "ordinate is unbounded there — shrink the window or use "
+                "the equirectangular projection")
+        if projection == "equirectangular":
+            clamp_y.append(sign * math.pi / 2.0)
+        else:
+            px, py, pvis = map_coordinates(plat, plon, view_lat_deg,
+                                           view_lon_deg, projection)
+            if pvis:
+                xs = np.append(xs, px)
+                ys = np.append(ys, py)
+                vis = np.append(vis, True)
+
+    xs, ys = xs[vis], ys[vis]
+    if len(xs) == 0:
+        raise ValueError("zoom window is entirely on the hidden hemisphere")
+    if projection != "orthographic":
+        # unwrap x about its circular mean so seam-crossing windows box
+        # tightly instead of spanning the whole map
+        mean = math.atan2(float(np.mean(np.sin(xs))),
+                          float(np.mean(np.cos(xs))))
+        xs = mean + (xs - mean + math.pi) % (2.0 * math.pi) - math.pi
+    xmin, xmax = float(xs.min()), float(xs.max())
+    ymin, ymax = float(ys.min()), float(ys.max())
+    for y in clamp_y:
+        ymin, ymax = min(ymin, y), max(ymax, y)
+    dx, dy = pad * (xmax - xmin), pad * (ymax - ymin)
+    return xmin - dx, xmax + dx, ymin - dy, ymax + dy
+
+
+@dataclass(frozen=True)
+class Site:
+    """A site to mark on the map: a symbol at geographic lat/lon, with an
+    optional label.
+
+    lat_deg, lon_deg : geographic position, degrees (east longitude).
+    marker : any matplotlib marker ("o" circle, "s" square, "^" triangle,
+        "*", "x", "+", ...).
+    filled : filled symbol (True) or open outline (False; ignored by
+        line markers like "x"/"+").
+    size : symbol size in points.
+    color : symbol (and label) color.
+    label : optional text drawn beside the symbol.
+    label_size : label font size, points.
+    label_offset : label placement control.  None (the default) leaves
+        placement to the automatic declutter pass of plot_sites (falling
+        back to 4 pt upper-right when that pass is disabled).  An
+        explicit (dx, dy) in points PINS the label there — the declutter
+        pass never moves a pinned label, and routes other labels around
+        it.  In a crowded field, pin well clear (20-40 pt) and the
+        leader line connects the label back to its symbol.
+    label_ha, label_va : label anchoring (matplotlib ha/va) for pinned
+        placement; the declutter pass chooses its own anchoring.
+    leader : draw a thin line connecting a pushed-out label back to its
+        symbol.  None (default) = automatic: a leader appears when the
+        (pinned or auto-chosen) offset exceeds 12 pt; True/False force
+        it on/off.
+    """
+
+    lat_deg: float
+    lon_deg: float
+    marker: str = "o"
+    filled: bool = True
+    size: float = 6.0
+    color: str = "black"
+    label: str | None = None
+    label_size: float = 8.0
+    label_offset: tuple | None = None
+    label_ha: str = "left"
+    label_va: str = "bottom"
+    leader: bool | None = None
+
+    #: offset length (points) beyond which leader=None draws a leader.
+    LEADER_AUTO_THRESHOLD = 12.0
+
+    #: fallback placement when declutter is off and no offset is pinned.
+    DEFAULT_OFFSET = (4.0, 4.0)
+
+    def wants_leader(self, offset=None):
+        """Whether the label gets a leader line, for the offset actually
+        used (defaults to the pinned offset / fallback)."""
+        if self.leader is not None:
+            return self.leader
+        off = offset if offset is not None else self.label_offset
+        if off is None:
+            off = self.DEFAULT_OFFSET
+        return math.hypot(*off) > self.LEADER_AUTO_THRESHOLD
+
+
+@dataclass(frozen=True)
+class MapText:
+    """Free-standing text placed by geographic lat/lon.
+
+    ha/va anchor the text on its point; rotation is in degrees
+    counterclockwise (screen frame).
+    """
+
+    lat_deg: float
+    lon_deg: float
+    text: str
+    size: float = 9.0
+    color: str = "black"
+    ha: str = "center"
+    va: str = "center"
+    rotation: float = 0.0
+
+
+#: Candidate label directions for the declutter pass, in preference
+#: order (upper-right first, cartographic convention), each with the
+#: text anchoring that keeps the label on that side of the symbol.
+_LABEL_DIRECTIONS = (
+    (0.7071, 0.7071, "left", "bottom"),     # NE
+    (-0.7071, 0.7071, "right", "bottom"),   # NW
+    (0.7071, -0.7071, "left", "top"),       # SE
+    (-0.7071, -0.7071, "right", "top"),     # SW
+    (1.0, 0.0, "left", "center"),           # E
+    (-1.0, 0.0, "right", "center"),         # W
+    (0.0, 1.0, "center", "bottom"),         # N
+    (0.0, -1.0, "center", "top"),           # S
+)
+
+#: Candidate ring radii, points: a close ring, then two leader rings.
+_LABEL_RINGS = (5.0, 24.0, 38.0)
+
+#: Clearance margin between placed rectangles, points.
+_LABEL_MARGIN = 1.5
+
+
+def _text_extent_points(ax, text, fontsize):
+    """(width, height) of a text in points, measured with the figure's
+    renderer."""
+    fig = ax.figure
+    try:
+        renderer = fig.canvas.get_renderer()
+    except AttributeError:              # backend without get_renderer
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+    probe = ax.text(0.0, 0.0, text, fontsize=fontsize,
+                    transform=ax.transAxes)
+    ext = probe.get_window_extent(renderer=renderer)
+    probe.remove()
+    scale = 72.0 / fig.dpi
+    return ext.width * scale, ext.height * scale
+
+
+def _anchor_rect(px, py, off, w, h, ha, va):
+    """Rectangle (x0, y0, x1, y1) of a w x h label anchored at
+    (px, py) + off with the given ha/va, all in points."""
+    x = px + off[0] - {"left": 0.0, "center": 0.5, "right": 1.0}[ha] * w
+    y = py + off[1] - {"bottom": 0.0, "center": 0.5, "top": 1.0}[va] * h
+    return (x, y, x + w, y + h)
+
+
+def _overlap_area(a, b, margin=_LABEL_MARGIN):
+    """Overlap area of two rectangles inflated by ``margin`` on each side."""
+    w = min(a[2], b[2]) - max(a[0], b[0]) + 2.0 * margin
+    h = min(a[3], b[3]) - max(a[1], b[1]) + 2.0 * margin
+    return max(0.0, w) * max(0.0, h)
+
+
+def plot_sites(ax, sites, view_lat_deg, view_lon_deg,
+               projection="orthographic", auto_labels=True,
+               avoid_texts=None):
+    """Draw Site markers (and their labels) on an existing map axes.
+
+    Sites on the hidden hemisphere of an orthographic map are skipped.
+
+    With ``auto_labels=True`` (the default), labels whose Site does not
+    pin a ``label_offset`` are placed by a deterministic declutter pass:
+    each label tries 8 compass positions on rings of 5/24/38 pt (in
+    input order, upper-right preferred) and takes the first spot clear
+    of every symbol, every pinned label, every label already placed, and
+    every ``avoid_texts`` MapText — falling back to the least-
+    overlapping candidate when the field is too crowded.  Leader lines
+    appear automatically for placements beyond the 12 pt threshold.
+    Pinned labels are never moved (they override the pass — and may
+    therefore overprint anything).  Call this after the map (and the
+    axes limits) are drawn, so screen geometry is final.
+
+    avoid_texts : iterable of MapText the declutter must route around
+        (``globe`` passes its ``texts``); they are obstacles only, drawn
+        separately by plot_texts.
+
+    With ``auto_labels=False`` every label uses its pinned offset, or
+    the 4 pt upper-right fallback.  Returns the list of sites drawn.
+    """
+    fig = ax.figure
+    scale = 72.0 / fig.dpi
+    ax.apply_aspect()   # finalize the data->screen transform before measuring
+
+    visible = []
+    for site in sites:
+        x, y, vis = map_coordinates(site.lat_deg, site.lon_deg,
+                                    view_lat_deg, view_lon_deg, projection)
+        if vis:
+            visible.append((site, x, y))
+
+    # symbols first; collect their screen anchors and obstacle boxes
+    anchors = []
+    obstacles = []
+    for site, x, y in visible:
+        ax.plot([x], [y], linestyle="none", marker=site.marker,
+                markersize=site.size,
+                markerfacecolor=site.color if site.filled else "none",
+                markeredgecolor=site.color, zorder=6)
+        px, py = ax.transData.transform((x, y)) * scale
+        anchors.append((px, py))
+        half = site.size / 2.0 + 1.0
+        obstacles.append((px - half, py - half, px + half, py + half))
+
+    # free-standing MapTexts are obstacles for the auto placement
+    # (appended after the symbol boxes, so own-symbol indexing holds)
+    for note in avoid_texts or ():
+        x, y, vis = map_coordinates(note.lat_deg, note.lon_deg,
+                                    view_lat_deg, view_lon_deg, projection)
+        if not vis:
+            continue
+        px, py = ax.transData.transform((x, y)) * scale
+        w, h = _text_extent_points(ax, note.text, note.size)
+        obstacles.append(_anchor_rect(px, py, (0.0, 0.0), w, h,
+                                      note.ha, note.va))
+
+    labeled = [(i, site) for i, (site, _, _) in enumerate(visible)
+               if site.label]
+    extents = {i: _text_extent_points(ax, site.label, site.label_size)
+               for i, site in labeled}
+
+    # pinned labels (and every label when auto is off) become obstacles
+    placements = {}
+    for i, site in labeled:
+        if auto_labels and site.label_offset is None:
+            continue
+        off = site.label_offset if site.label_offset is not None \
+            else Site.DEFAULT_OFFSET
+        placements[i] = (off, site.label_ha, site.label_va)
+        obstacles.append(_anchor_rect(*anchors[i], off, *extents[i],
+                                      site.label_ha, site.label_va))
+
+    # declutter the rest: first collision-free candidate, else least bad.
+    # A site's own symbol box (obstacles[i]) is not an obstacle to its
+    # own label — close placement hugging the marker is the ideal.
+    for i, site in labeled:
+        if i in placements:
+            continue
+        best = None
+        best_area = math.inf
+        for ring in _LABEL_RINGS:
+            for ux, uy, ha, va in _LABEL_DIRECTIONS:
+                off = (ux * ring, uy * ring)
+                rect = _anchor_rect(*anchors[i], off, *extents[i], ha, va)
+                area = sum(_overlap_area(rect, o)
+                           for j, o in enumerate(obstacles) if j != i)
+                if area < best_area:
+                    best, best_area = (off, ha, va, rect), area
+                if area == 0.0:
+                    break
+            if best_area == 0.0:
+                break
+        placements[i] = best[:3]
+        obstacles.append(best[3])
+
+    for i, site in labeled:
+        off, ha, va = placements[i]
+        arrowprops = None
+        if site.wants_leader(off):
+            # plain thin line, stopped short of the marker edge
+            arrowprops = dict(arrowstyle="-", linewidth=0.6,
+                              color=site.color, shrinkA=2.0,
+                              shrinkB=site.size / 2.0 + 1.5, zorder=6)
+        x, y = visible[i][1], visible[i][2]
+        ax.annotate(site.label, (x, y), textcoords="offset points",
+                    xytext=off, fontsize=site.label_size, color=site.color,
+                    ha=ha, va=va, arrowprops=arrowprops, zorder=7)
+
+    return [site for site, _, _ in visible]
+
+
+def plot_texts(ax, texts, view_lat_deg, view_lon_deg,
+               projection="orthographic"):
+    """Draw MapText annotations on an existing map axes (hidden-hemisphere
+    texts are skipped on the orthographic map).  Returns the texts drawn."""
+    drawn = []
+    for note in texts:
+        x, y, visible = map_coordinates(note.lat_deg, note.lon_deg,
+                                        view_lat_deg, view_lon_deg,
+                                        projection)
+        if not visible:
+            continue
+        ax.text(x, y, note.text, fontsize=note.size, color=note.color,
+                ha=note.ha, va=note.va, rotation=note.rotation, zorder=7)
+        drawn.append(note)
+    return drawn
 
 
 # ---------------------------------------------------------------------------
@@ -758,8 +1381,11 @@ def offset_prediction(ra, dec, ra_offset, dec_offset, b_arcsec, pa_deg,
 
 
 def globe(star, time, projection="orthographic", horizon_angle=0.0,
-          shadow_gray=0.8, tracks=False, dist=0.0, pa=0.0, radius=0.0,
-          pred_error=0.0, print_diagnostic=False, ax=None, plot_label=None):
+          shadow_gray=0.8, land_color=None, ocean_color=None,
+          night_land_color=None, twilight=None, tracks=False, dist=0.0,
+          pa=0.0, radius=0.0, pred_error=0.0, sites=None, texts=None,
+          auto_labels=True, zoom_latlon=None, zoom_xy=None,
+          print_diagnostic=False, ax=None, plot_label=None):
     """Draw the occultation shadow map (the smGlobe product).
 
     star : SkyCoord (any frame), "HH MM SS ±DD MM SS" string, or an
@@ -773,12 +1399,44 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
         for a point to be shaded (0 = terminator; 18 = astronomical
         dark; add ~0.57 for refraction if wanted).
     shadow_gray : night-side gray level, 0 black to 1 white.
+    land_color, ocean_color, night_land_color : optional styling — the
+        default (all None) is the clean outline map.  ``land_color``
+        fills the Natural Earth land polygons; ``ocean_color`` fills the
+        water (the disk on the orthographic map, the whole frame on
+        cylindrical ones); with a land fill, the night-side land is
+        drawn in ``night_land_color`` (default: land blended 50/50
+        toward the shadow tone, so land/ocean contrast survives into
+        the night) — any matplotlib colors.
+    twilight : graded night shading (opt-in; the default None keeps the
+        single shadow at ``horizon_angle``).  True draws the standard
+        bands at 0/6/12/18 deg sun depression, shaded from light down
+        to ``shadow_gray`` at full night; or pass explicit
+        ``[(angle_deg, color), ...]`` bands (lightest/shallowest
+        first).  ``twilight`` supersedes ``horizon_angle``; with a land
+        fill, each band derives its own night-land tone
+        (``night_land_color`` applies only to the single-shadow mode).
     tracks, dist, pa, radius, pred_error : draw the shadow-track band
         (see shadow_tracks).  On the orthographic map these are the
         straight fundamental-plane lines; on mercator/equirectangular
         maps the on-Earth ground tracks are drawn instead (see
         track_ground_paths) — lines that miss the Earth have no ground
         track there.
+    sites : iterable of Site — symbols (with optional labels) placed by
+        geographic lat/lon (see plot_sites; hidden-hemisphere sites are
+        skipped on the orthographic map).
+    texts : iterable of MapText — free text placed by geographic lat/lon
+        (see plot_texts).
+    auto_labels : run the declutter pass on site labels that do not pin
+        a label_offset (see plot_sites); pinned labels are never moved.
+    zoom_latlon : (lat_min, lat_max, lon_min, lon_max) in degrees — zoom
+        the map to a geographic window (any projection; see map_window,
+        including its view-pole and seam caveats).  lon_min > lon_max
+        crosses the ±180 meridian.
+    zoom_xy : (xmin, xmax, ymin, ymax) — zoom to raw map coordinates
+        (orthographic: Earth radii on the disk; cylindrical: view-frame
+        radians / mercator ordinate).  Mutually exclusive with
+        zoom_latlon.  Label decluttering runs after zooming, so
+        placements adapt to the zoomed scale.
     print_diagnostic : print the track diagnostic note (with
         tracks=True), as in the original.
     ax : matplotlib axes to draw into (a new figure is created if None).
@@ -789,19 +1447,71 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
     import matplotlib.pyplot as plt  # optional at import time, as in EPQ03
 
     _check_projection(projection)
+    if zoom_latlon is not None and zoom_xy is not None:
+        raise ValueError("give zoom_latlon or zoom_xy, not both")
     coord = star_coord(*star) if isinstance(star, tuple) else star_coord(star)
     t = as_time(time)
     view_lat, view_lon = substar_point(coord, t)
     anti_lat, anti_lon = antisolar_point(t)
 
+    from matplotlib.colors import to_rgb
+    from matplotlib.patches import PathPatch
+    from matplotlib.path import Path
+
     if ax is None:
         _, ax = plt.subplots(figsize=(6.0, 6.0))
 
-    poly = night_polygon(view_lat, view_lon, anti_lat, anti_lon,
-                         horizon_angle, projection)
-    if len(poly):
-        ax.fill(poly[:, 0], poly[:, 1], facecolor=(shadow_gray,) * 3,
-                edgecolor="none", zorder=1)
+    shifts = (0.0,) if projection == "orthographic" \
+        else (-2.0 * math.pi, 0.0, 2.0 * math.pi)
+    if ocean_color is not None:
+        if projection == "orthographic":
+            ax.add_patch(plt.Circle((0.0, 0.0), 1.0, facecolor=ocean_color,
+                                    edgecolor="none", zorder=0.3))
+        else:
+            ax.add_patch(plt.Rectangle((-7.0, -10.0), 14.0, 20.0,
+                                       facecolor=ocean_color,
+                                       edgecolor="none", zorder=0.3))
+    if land_color is not None:
+        plot_land(ax, view_lat, view_lon, projection, color=land_color,
+                  zorder=0.6)
+
+    # night shading: one cap at horizon_angle, or graded twilight bands
+    if twilight is None:
+        bands = [(horizon_angle, (shadow_gray,) * 3)]
+    elif twilight is True:
+        # civil/nautical/astronomical/full-night, lightest to deepest,
+        # the deepest at shadow_gray
+        angles = (0.0, 6.0, 12.0, 18.0)
+        bands = [(a, (1.0 - (1.0 - shadow_gray) * (i + 1) / len(angles),) * 3)
+                 for i, a in enumerate(angles)]
+    else:
+        bands = [(a, to_rgb(c)) for a, c in twilight]
+
+    for k, (h_band, tone) in enumerate(bands):
+        poly = night_polygon(view_lat, view_lon, anti_lat, anti_lon,
+                             h_band, projection)
+        if not len(poly):
+            continue
+        verts = []
+        codes = []
+        for s in shifts:   # cylindrical night region tiles mod 2*pi
+            shifted = poly if s == 0.0 else poly + np.array([s, 0.0])
+            verts.append(np.vstack([shifted, shifted[:1]]))
+            codes.append(np.concatenate(
+                [[Path.MOVETO], np.full(len(shifted) - 1, Path.LINETO),
+                 [Path.CLOSEPOLY]]))
+        night_patch = PathPatch(Path(np.vstack(verts), np.concatenate(codes)),
+                                facecolor=tone, edgecolor="none",
+                                zorder=1 + 0.02 * k)
+        ax.add_patch(night_patch)
+        if land_color is not None:
+            if night_land_color is not None and twilight is None:
+                nl = night_land_color
+            else:
+                nl = tuple(0.5 * (a + b) for a, b in
+                           zip(to_rgb(land_color), tone))
+            plot_land(ax, view_lat, view_lon, projection, color=nl,
+                      zorder=1.01 + 0.02 * k, clip_patch=night_patch)
     for line in coastline_outlines(view_lat, view_lon, projection):
         ax.plot(line[:, 0], line[:, 1], color="black", linewidth=0.5,
                 zorder=2)
@@ -846,7 +1556,23 @@ def globe(star, time, projection="orthographic", horizon_angle=0.0,
                             linewidth=0.8, linestyle="--", zorder=4)
             if print_diagnostic and tp.note:
                 print(tp.note)
+    if zoom_latlon is not None:
+        xmin, xmax, ymin, ymax = map_window(*zoom_latlon, view_lat, view_lon,
+                                            projection)
+        ax.set_xlim(xmin, xmax)
+        ax.set_ylim(ymin, ymax)
+    elif zoom_xy is not None:
+        xmin, xmax, ymin, ymax = zoom_xy
+        ax.set_xlim(xmin, xmax)
+        ax.set_ylim(ymin, ymax)
     ax.set_aspect("equal")
+    # annotations go last, once limits and aspect are final — the
+    # declutter pass measures real screen geometry
+    if sites:
+        plot_sites(ax, sites, view_lat, view_lon, projection,
+                   auto_labels=auto_labels, avoid_texts=texts)
+    if texts:
+        plot_texts(ax, texts, view_lat, view_lon, projection)
     ax.set_axis_off()
     if plot_label is not None:
         ax.set_title(plot_label)

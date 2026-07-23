@@ -304,7 +304,9 @@ def test_night_polygon_boundary_at_horizon_angle(h, tol_deg):
     view_lat, view_lon = 37.3, -14.2
     anti_lat, anti_lon = -21.4, 133.7
     poly = sm.night_polygon(view_lat, view_lon, anti_lat, anti_lon, h,
-                            "equirectangular")
+                            "equirectangular")[:203]   # boundary only:
+    # pole-edge closure vertices (appended past the 203 cap points when
+    # the cap encloses a view pole) are not terminator points
     lat, lon = sm.view_rotation_inverse(poly[:, 1], poly[:, 0],
                                         view_lat, view_lon)
     cosd = (math.sin(math.radians(anti_lat)) * np.sin(lat)
@@ -323,7 +325,7 @@ def test_night_polygon_terminator_via_astropy_sun():
         sm.star_coord("17 45 31.20", "-22 28 45.5"), t)
     anti_lat, anti_lon = sm.antisolar_point(t)
     poly = sm.night_polygon(view_lat, view_lon, anti_lat, anti_lon, h,
-                            "equirectangular")
+                            "equirectangular")[:203]   # boundary only
     lat, lon = sm.view_rotation_inverse(poly[:, 1], poly[:, 0],
                                         view_lat, view_lon)
     sun = get_sun(t).transform_to(ITRS(obstime=t)).spherical
@@ -362,6 +364,40 @@ def test_night_polygon_invisible_returns_empty():
     # nothing to shade.  (The original's clipper errored in this case.)
     poly = sm.night_polygon(0.0, 0.0, 0.0, 180.0, 18.0, "orthographic")
     assert poly.shape == (0, 2)
+
+
+@pytest.mark.parametrize("vlat,vlon,alat,alon,h", [
+    (42.36, -71.09, -23.21, 107.12, 0.0),    # v4 geometry: seam-crossing cap
+    (42.36, -71.09, -23.21, 107.12, 12.0),
+    (0.0, 0.0, 80.0, 10.0, 0.0),             # cap enclosing a view pole
+    (0.0, 0.0, -80.0, 10.0, 6.0),            # ... the south one
+    (-20.67, 114.24, 23.21, -72.88, 12.0),   # 2015-like band geometry
+    (37.3, -14.2, -21.4, 133.7, 6.0),        # pole-enclosed, off-center
+])
+def test_night_region_cylindrical_matches_truth(vlat, vlon, alat, alon, h):
+    # The filled polygon (tiled mod 2*pi, as globe draws it) must contain
+    # exactly the points whose angular distance from the antisolar point
+    # is below 90-h deg.  Random earth points, 2.5 deg terminator margin.
+    from matplotlib.path import Path
+
+    poly = sm.night_polygon(vlat, vlon, alat, alon, h, "equirectangular")
+    paths = [Path(poly + np.array([s, 0.0]))
+             for s in (-2.0 * math.pi, 0.0, 2.0 * math.pi)]
+    rng = np.random.default_rng(7)
+    lat = np.degrees(np.arcsin(rng.uniform(-1.0, 1.0, 600)))
+    lon = np.degrees(rng.uniform(-math.pi, math.pi, 600))
+    cosd = (np.sin(np.radians(lat)) * math.sin(math.radians(alat))
+            + np.cos(np.radians(lat)) * math.cos(math.radians(alat))
+            * np.cos(np.radians(lon - alon)))
+    d = np.degrees(np.arccos(np.clip(cosd, -1.0, 1.0)))
+    clear = np.abs(d - (90.0 - h)) > 2.5
+    truth = d < (90.0 - h)
+    xs, ys, _ = sm.map_coordinates(lat, lon, vlat, vlon, "equirectangular")
+    pts = np.column_stack([xs, ys])
+    inside = np.zeros(len(pts), dtype=bool)
+    for p in paths:
+        inside |= p.contains_points(pts)
+    assert np.array_equal(inside[clear], truth[clear])
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +543,508 @@ def test_offset_prediction_input_validation():
     with pytest.raises(ValueError):
         sm.offset_prediction("17 45 31.20", "-22 28 45.5", 0.0, 0.0,
                              0.31, 157.5, "2015 06 29 16 55 00", 24.2, 31.9)
+
+
+# ---------------------------------------------------------------------------
+# Sites and text annotations (Labelling)
+# ---------------------------------------------------------------------------
+
+
+def test_map_coordinates_center_and_visibility():
+    x, y, vis = sm.map_coordinates(42.36, -71.09, 42.36, -71.09)
+    assert vis and abs(x) < 1e-12 and abs(y) < 1e-12
+    # the antipode of the view center is hidden on the orthographic map
+    x, y, vis = sm.map_coordinates(-42.36, 108.91, 42.36, -71.09)
+    assert not vis
+    # ... but always "visible" on a cylindrical map
+    _, _, vis = sm.map_coordinates(-42.36, 108.91, 42.36, -71.09,
+                                   "equirectangular")
+    assert vis
+
+
+def test_map_coordinates_arrays_match_projection_chain():
+    lats = np.array([10.0, -30.0, 60.0])
+    lons = np.array([50.0, -120.0, -71.0])
+    xs, ys, vis = sm.map_coordinates(lats, lons, 42.36, -71.09)
+    latp, lonp = sm.view_rotation(np.radians(lats), np.radians(lons),
+                                  42.36, -71.09)
+    assert np.allclose(xs, np.cos(latp) * np.sin(lonp), atol=1e-12)
+    assert np.allclose(ys, np.sin(latp), atol=1e-12)
+    assert vis.dtype == bool and len(vis) == 3
+
+
+def test_plot_sites_hidden_hemisphere_skipped():
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots()
+    sites = [sm.Site(42.36, -71.09, label="MIT"),
+             sm.Site(-42.36, 108.91, label="far side"),
+             sm.Site(25.76, -80.19, marker="s", filled=False)]
+    drawn = sm.plot_sites(ax, sites, 42.36, -71.09)
+    assert len(drawn) == 2                       # far-side site skipped
+    assert len(ax.lines) == 2                    # one marker artist per site
+    assert len(ax.texts) == 1                    # only MIT carries a label
+    notes = sm.plot_texts(ax, [sm.MapText(30.0, -60.0, "note"),
+                               sm.MapText(-42.36, 108.91, "hidden")],
+                          42.36, -71.09)
+    assert len(notes) == 1
+    assert len(ax.texts) == 2
+    plt.close(fig)
+
+
+def test_site_leader_lines():
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    # auto: small offset -> no leader; large offset -> leader
+    assert not sm.Site(0, 0, label="a").wants_leader()
+    assert sm.Site(0, 0, label="a", label_offset=(-30.0, 18.0)).wants_leader()
+    # explicit override wins in both directions
+    assert sm.Site(0, 0, label="a", leader=True).wants_leader()
+    assert not sm.Site(0, 0, label="a", label_offset=(40.0, 0.0),
+                       leader=False).wants_leader()
+
+    fig, ax = plt.subplots()
+    sm.plot_sites(ax, [
+        sm.Site(42.36, -71.09, label="near"),                       # no leader
+        sm.Site(45.42, -75.70, label="pushed",
+                label_offset=(30.0, 20.0)),                         # leader
+    ], 42.36, -71.09)
+    arrows = [t for t in ax.texts if getattr(t, "arrow_patch", None)]
+    assert len(ax.texts) == 2
+    assert len(arrows) == 1
+    plt.close(fig)
+
+
+_CLUSTER_SITES = [
+    ("MIT", 42.3601, -71.0942),
+    ("Wallace", 42.6105, -71.4817),
+    ("Ottawa", 45.4215, -75.6972),
+    ("Miami", 25.7617, -80.1918),
+    ("Lowell Obs.", 35.2028, -111.6646),
+]
+
+
+def _cluster_globe(**site_kw_by_name):
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    sites = [sm.Site(lat, lon, label=name, **site_kw_by_name.get(name, {}))
+             for name, lat, lon in _CLUSTER_SITES]
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                  tracks=True, dist=0.2, pa=20.0, radius=0.2, sites=sites)
+    return ax
+
+
+def _label_extents(ax):
+    # Text-only boxes: Annotation.get_window_extent unions in the leader
+    # line's bbox, which is not what label-collision checks should use.
+    from matplotlib.text import Text
+    ax.figure.canvas.draw()
+    renderer = ax.figure.canvas.get_renderer()
+    return {t.get_text(): Text.get_window_extent(t, renderer)
+            for t in ax.texts}
+
+
+def test_declutter_resolves_cluster():
+    # The five-site reference cluster (MIT/Wallace 35 km apart, Ottawa
+    # nearby): with the declutter pass, no two rendered labels overlap.
+    import matplotlib.pyplot as plt
+    ax = _cluster_globe()
+    ext = _label_extents(ax)
+    names = list(ext)
+    assert len(names) == 5
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            ea, eb = ext[a], ext[b]
+            assert (ea.x1 <= eb.x0 or eb.x1 <= ea.x0
+                    or ea.y1 <= eb.y0 or eb.y1 <= ea.y0), (a, b)
+    plt.close(ax.figure)
+
+
+def test_declutter_respects_pinned_label():
+    import matplotlib.pyplot as plt
+    ax = _cluster_globe(MIT=dict(label_offset=(6.0, -7.0),
+                                 label_ha="left", label_va="top"))
+    ann = {t.get_text(): t for t in ax.texts}
+    assert ann["MIT"].xyann == (6.0, -7.0)          # pinned, not moved
+    assert ann["MIT"].get_ha() == "left"
+    assert ann["MIT"].get_va() == "top"
+    plt.close(ax.figure)
+
+
+def test_declutter_is_deterministic():
+    import matplotlib.pyplot as plt
+    offs = []
+    for _ in range(2):
+        ax = _cluster_globe()
+        offs.append(sorted((t.get_text(), t.xyann) for t in ax.texts))
+        plt.close(ax.figure)
+    assert offs[0] == offs[1]
+
+
+def test_declutter_avoids_maptexts():
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+    from matplotlib.text import Text
+
+    # A MapText parked exactly on the site's preferred NE quadrant: with
+    # avoid_texts the auto label must land clear of it; without, it
+    # overprints.  Measured from rendered text-only extents.
+    site = sm.Site(42.36, -71.09, label="Station")
+    note = sm.MapText(42.36, -71.09, "BLOCKER", size=10,
+                      ha="left", va="bottom")
+
+    def render(avoid):
+        fig, ax = plt.subplots()
+        sm.plot_sites(ax, [site], 42.36, -71.09,
+                      avoid_texts=[note] if avoid else None)
+        sm.plot_texts(ax, [note], 42.36, -71.09)
+        fig.canvas.draw()
+        renderer = fig.canvas.get_renderer()
+        ext = {t.get_text(): Text.get_window_extent(t, renderer)
+               for t in ax.texts}
+        plt.close(fig)
+        return ext["Station"], ext["BLOCKER"]
+
+    def overlaps(a, b):
+        return not (a.x1 <= b.x0 or b.x1 <= a.x0
+                    or a.y1 <= b.y0 or b.y1 <= a.y0)
+
+    with_avoid = render(avoid=True)
+    without = render(avoid=False)
+    assert not overlaps(*with_avoid)
+    assert overlaps(*without)          # proves the obstacle changed it
+
+
+def test_auto_labels_off_restores_fallback():
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    sites = [sm.Site(42.36, -71.09, label="a"),
+             sm.Site(42.61, -71.48, label="b",
+                     label_offset=(-20.0, 10.0), label_ha="right")]
+    sm.plot_sites(ax, sites, 42.36, -71.09, auto_labels=False)
+    ann = {t.get_text(): t for t in ax.texts}
+    assert ann["a"].xyann == sm.Site.DEFAULT_OFFSET
+    assert ann["b"].xyann == (-20.0, 10.0)
+    plt.close(fig)
+
+
+def test_globe_with_sites_and_texts(tmp_path):
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    sites = [sm.Site(42.3601, -71.0942, label="MIT"),
+             sm.Site(35.2028, -111.6646, marker="^", label="Lowell")]
+    texts = [sm.MapText(28.0, -45.0, "2026-10-01 04:00 UT", size=8)]
+    for proj in sm.PROJECTIONS:
+        ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                      projection=proj, tracks=True, dist=0.2, pa=20.0,
+                      radius=0.2, sites=sites, texts=texts)
+        markers = [ln for ln in ax.lines
+                   if ln.get_marker() not in ("", "None", None)]
+        assert len(markers) == 2, proj
+        assert any("04:00 UT" in txt.get_text() for txt in ax.texts), proj
+        ax.figure.savefig(tmp_path / f"sites_{proj}.png", dpi=72)
+        plt.close(ax.figure)
+
+
+# ---------------------------------------------------------------------------
+# Land fill
+# ---------------------------------------------------------------------------
+
+
+def test_land_polygons_pins():
+    feats = sm.land_polygons()
+    assert len(feats) == 127
+    rings = [r for f in feats for r in f]
+    assert len(rings) == 128
+    assert sum(1 for is_hole, _ in rings if is_hole) == 1   # the Caspian
+    total = sum(len(r) for _, r in rings)
+    assert total == 5143
+    alldeg = np.degrees(np.vstack([r for _, r in rings]))
+    assert alldeg[:, 0].min() == pytest.approx(-90.0, abs=1e-6)
+    assert float(np.abs(alldeg).sum()) == pytest.approx(667770.998, abs=0.01)
+
+
+def _land_pixel_sampler(view_lat, view_lon, proj):
+    """Render ONLY the land fill (black on white) and return a sampler
+    (lat, lon) -> bool.  Pixel truth: matplotlib's Path.contains_point
+    ignores holes in compound paths (union-like behavior), so tests
+    must sample what Agg actually renders."""
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(8.0, 8.0), dpi=100)
+    sm.plot_land(ax, view_lat, view_lon, proj, color="black")
+    if proj == "orthographic":
+        ax.set_xlim(-1.1, 1.1)
+        ax.set_ylim(-1.1, 1.1)
+    else:
+        ax.set_xlim(-math.pi, math.pi)
+        ax.set_ylim((-3.0, 3.0) if proj == "mercator"
+                    else (-math.pi / 2.0, math.pi / 2.0))
+    ax.set_axis_off()
+    fig.canvas.draw()
+    buf = np.asarray(fig.canvas.buffer_rgba()).copy()
+    height = buf.shape[0]
+
+    def is_land(lat, lon):
+        x, y, vis = sm.map_coordinates(lat, lon, view_lat, view_lon, proj)
+        if not vis:
+            return None
+        px, py = ax.transData.transform((x, y))
+        return buf[height - 1 - int(round(py)), int(round(px)), 0] < 128
+
+    def close():
+        plt.close(fig)
+
+    return is_land, close
+
+
+@pytest.mark.parametrize("proj", sm.PROJECTIONS)
+def test_land_fill_containment_truth(proj):
+    is_land, close = _land_pixel_sampler(42.36, -71.09, proj)
+    cases = [
+        (39.0, -98.0, True),      # Kansas
+        (23.0, 13.0, True),       # Sahara
+        (-14.0, -130.0, False),   # South Pacific
+        (42.0, 51.0, False),      # Caspian Sea: the hole must stay sea
+        (64.0, 26.0, True),       # Finland
+        (0.0, -30.0, False),      # equatorial Atlantic
+    ]
+    for lat, lon, want in cases:
+        if proj == "orthographic":
+            # skip strongly foreshortened points: within ~20 deg of the
+            # limb a feature narrows below pixel scale (the Caspian at
+            # 81 deg from center renders ~1.5 px wide)
+            cosd = (math.sin(math.radians(lat)) * math.sin(math.radians(42.36))
+                    + math.cos(math.radians(lat)) * math.cos(math.radians(42.36))
+                    * math.cos(math.radians(lon + 71.09)))
+            if math.degrees(math.acos(max(-1.0, min(1.0, cosd)))) > 70.0:
+                continue
+        got = is_land(lat, lon)
+        if got is None:
+            continue                      # hidden on the orthographic map
+        assert got == want, (proj, lat, lon)
+    close()
+
+
+def test_land_fill_limb_lune():
+    # Regression (review of 04a7842): Sutherland-Hodgman alone chords
+    # each hidden span across the limb, losing the lune — central
+    # Australia at d = 84 deg from a (20 N, 60 E) view rendered as
+    # water.  With limb-arc closure it must render as land.
+    is_land, close = _land_pixel_sampler(20.0, 60.0, "orthographic")
+    assert is_land(-25.0, 133.0)              # visible, 6 deg inside limb
+    assert is_land(-30.0, 25.0)               # South Africa, mid-disk
+    assert not is_land(-40.0, 95.0)           # south Indian Ocean
+    close()
+
+
+def test_land_fill_limb_arcs_are_sampled():
+    # Render-free structure: wherever the clipped outline runs along the
+    # limb (r ~ 1), consecutive vertices must subtend <~ 2 deg — long
+    # chords between crossings mean the arc insertion is broken.
+    for view_lat, view_lon in [(20.0, 60.0), (-30.0, -60.0),
+                               (42.36, -71.09)]:
+        for rings in sm.land_polygons():
+            for is_hole, ring in rings:
+                latp, lonp = sm.view_rotation(ring[:, 0], ring[:, 1],
+                                              view_lat, view_lon)
+                for xy in sm._fill_ring_xy(latp, lonp, "orthographic",
+                                           ring_ccw=sm._ring_is_ccw(ring)):
+                    r = np.hypot(xy[:, 0], xy[:, 1])
+                    th = np.arctan2(xy[:, 1], xy[:, 0])
+                    nxt = np.roll(np.arange(len(xy)), -1)
+                    both = (r > 1.0 - 1e-3) & (r[nxt] > 1.0 - 1e-3)
+                    dth = np.abs((th[nxt] - th + math.pi)
+                                 % (2.0 * math.pi) - math.pi)
+                    assert np.all(dth[both] < math.radians(2.5)), \
+                        (view_lat, view_lon)
+
+
+def test_land_fill_orthographic_hole_near_center():
+    # Caspian-centered view: the hole must render as sea on the disk.
+    is_land, close = _land_pixel_sampler(45.0, 50.0, "orthographic")
+    assert is_land(42.0, 51.0) is not None and not is_land(42.0, 51.0)
+    assert is_land(48.0, 68.0)            # Kazakh steppe east of it
+    assert is_land(28.0, 45.0)            # Arabian peninsula
+    close()
+
+
+def test_land_fill_seam_and_hidden_hemisphere():
+    # Pacific-centered view: Eurasia/Africa straddle the seam on the
+    # cylindrical map and are mostly hidden on the orthographic one.
+    is_land, close = _land_pixel_sampler(0.0, -170.0, "equirectangular")
+    for lat, lon, want in [(48.0, 11.0, True),     # Bavaria, across the seam
+                           (-25.0, 134.0, True),   # Australia
+                           (0.0, -120.0, False)]:  # eastern Pacific
+        assert is_land(lat, lon) == want, (lat, lon)
+    close()
+
+    # Orthographic from the antipode of Kansas: North America hidden,
+    # nothing may fill at the disk center.
+    is_land, close = _land_pixel_sampler(-39.0, 82.0, "orthographic")
+    x = is_land(-39.0, 82.0)               # the visible center point
+    assert x is not None and not x
+    close()
+
+
+def test_globe_default_look_unchanged():
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    # No styling flags: exactly the limb circle and the night patch on
+    # the orthographic map — no land/ocean patches.
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00")
+    assert len(ax.patches) == 2
+    plt.close(ax.figure)
+
+
+def test_globe_styling_layers():
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                  land_color="0.93", ocean_color="white")
+    # limb + night + ocean disk + day-land features + clipped night-land
+    assert len(ax.patches) > 100
+    night_land = [p for p in ax.patches if p.get_clip_path() is not None]
+    assert len(night_land) > 30
+    plt.close(ax.figure)
+
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                  projection="equirectangular", land_color="0.93",
+                  ocean_color="0.99", night_land_color="0.7",
+                  zoom_latlon=(12.0, 62.0, -130.0, -55.0))
+    assert len(ax.patches) > 100
+    plt.close(ax.figure)
+
+
+def test_twilight_bands():
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import PathPatch
+
+    # outlines only: four band patches, lightest 0.95 down to
+    # shadow_gray at full night
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                  twilight=True)
+    bands = [p for p in ax.patches if isinstance(p, PathPatch)]
+    assert len(bands) == 4
+    tones = sorted(round(p.get_facecolor()[0], 6) for p in bands)
+    assert tones == [0.8, 0.85, 0.9, 0.95]
+    plt.close(ax.figure)
+
+    # with a land fill every band derives its own night-land tone
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                  twilight=True, land_color="0.93")
+    clipped = [p for p in ax.patches if p.get_clip_path() is not None]
+    assert len({round(p.get_facecolor()[0], 6) for p in clipped}) == 4
+    plt.close(ax.figure)
+
+    # custom bands pass through verbatim
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                  twilight=[(0.0, "0.9"), (18.0, "0.7")])
+    bands = [p for p in ax.patches if isinstance(p, PathPatch)]
+    assert len(bands) == 2
+    assert {round(p.get_facecolor()[0], 6) for p in bands} == {0.9, 0.7}
+    plt.close(ax.figure)
+
+
+# ---------------------------------------------------------------------------
+# Zoom windows
+# ---------------------------------------------------------------------------
+
+
+def test_map_window_identity_at_view_center():
+    # View (0, 0) on equirectangular: lat'/lon' = lat/lon, so the box is
+    # just the (padded) window in radians.
+    xmin, xmax, ymin, ymax = sm.map_window(-10.0, 10.0, -20.0, 30.0,
+                                           0.0, 0.0, "equirectangular",
+                                           pad=0.0)
+    assert xmin == pytest.approx(math.radians(-20.0), abs=1e-9)
+    assert xmax == pytest.approx(math.radians(30.0), abs=1e-9)
+    assert ymin == pytest.approx(math.radians(-10.0), abs=1e-9)
+    assert ymax == pytest.approx(math.radians(10.0), abs=1e-9)
+
+
+def test_map_window_dateline_crossing():
+    # lon 150 -> -160 crosses the 180 meridian: 50 deg wide, not 310.
+    xmin, xmax, _, _ = sm.map_window(-10.0, 10.0, 150.0, -160.0,
+                                     0.0, 180.0, "equirectangular", pad=0.0)
+    assert (xmax - xmin) == pytest.approx(math.radians(50.0), abs=1e-6)
+
+
+def test_map_window_pole_handling():
+    # View (0,0): the north view pole is the geographic north pole.  A
+    # window that actually contains it is unbounded on mercator and
+    # clamped to the map edge on equirectangular; one stopping short
+    # (89.5) is legal on mercator — just tall.
+    with pytest.raises(ValueError, match="pole"):
+        sm.map_window(80.0, 90.0, -180.0, 180.0 - 1e-9, 0.0, 0.0, "mercator")
+    box = sm.map_window(80.0, 89.5, -180.0, 180.0 - 1e-9, 0.0, 0.0,
+                        "mercator", pad=0.0)
+    assert math.isfinite(box[3])
+    _, _, _, ymax = sm.map_window(80.0, 90.0, -180.0, 180.0 - 1e-9,
+                                  0.0, 0.0, "equirectangular", pad=0.0)
+    assert ymax == pytest.approx(math.pi / 2.0, abs=1e-9)
+
+
+def test_map_window_orthographic_visibility():
+    # A window on the near side boxes fine; the antipodal window errors.
+    box = sm.map_window(30.0, 55.0, -100.0, -60.0, 42.36, -71.09,
+                        "orthographic")
+    assert -1.0 <= box[0] < box[1] <= 1.0
+    assert -1.0 <= box[2] < box[3] <= 1.0
+    with pytest.raises(ValueError, match="hidden"):
+        sm.map_window(-55.0, -30.0, 80.0, 120.0, 42.36, -71.09,
+                      "orthographic")
+
+
+def test_map_window_validation():
+    with pytest.raises(ValueError, match="lat_min"):
+        sm.map_window(10.0, -10.0, 0.0, 20.0, 0.0, 0.0)
+    with pytest.raises(ValueError, match="longitude span"):
+        sm.map_window(-10.0, 10.0, 30.0, 30.0, 0.0, 0.0)
+
+
+def test_globe_zoom(tmp_path):
+    import matplotlib
+    matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    na = (12.0, 62.0, -130.0, -55.0)
+    for proj in sm.PROJECTIONS:
+        ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                      projection=proj, tracks=True, dist=0.2, pa=20.0,
+                      radius=0.2, zoom_latlon=na)
+        want = sm.map_window(*na, 42.3601, -71.0942, proj)
+        assert ax.get_xlim() == pytest.approx((want[0], want[1]), rel=1e-3)
+        assert ax.get_ylim() == pytest.approx((want[2], want[3]), rel=1e-3)
+        plt.close(ax.figure)
+
+    ax = sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                  tracks=True, dist=0.2, pa=20.0, radius=0.2,
+                  zoom_xy=(-0.6, 0.7, -0.5, 0.8))
+    assert ax.get_xlim() == (-0.6, 0.7)
+    assert ax.get_ylim() == (-0.5, 0.8)
+    plt.close(ax.figure)
+
+    with pytest.raises(ValueError, match="not both"):
+        sm.globe("23 53 52.4 42 12 29", "2026-10-01 04:00:00",
+                 zoom_latlon=na, zoom_xy=(-1, 1, -1, 1))
 
 
 # ---------------------------------------------------------------------------
