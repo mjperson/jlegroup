@@ -7,7 +7,7 @@ the recorded version-bump commits; from v0.9.0 onward, tagging happens at releas
 Version scheme: `0.N.0` during development; `1.0.0` (2026-07-18) is the first
 public release.
 
-## [Unreleased]
+## [1.1.0] — 2026-07-22 — Labeling and other improvements to shadowmap
 
 - **shadowmap annotation, zoom, and styling layer** (newly written; no
   Mathematica counterpart) — all opt-in, the bare-globe default verified
